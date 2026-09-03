@@ -1,0 +1,13 @@
+[
+  {
+    "id": "example-product-1",
+    "name": "商品名をここに入力",
+    "url": "https://example.com/affiliate-link-1",
+    "points": [
+      "この商品の推しポイント1",
+      "この商品の推しポイント2",
+      "この商品の推しポイント3"
+    ],
+    "imageUrl": "https://example.com/product-image.jpg"
+  }
+]

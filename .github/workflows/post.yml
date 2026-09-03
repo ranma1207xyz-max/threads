@@ -1,0 +1,47 @@
+name: Threads auto post
+
+on:
+  schedule:
+    # 09:00 / 13:00 / 20:00 JST (UTC+9) -> 00:00 / 04:00 / 11:00 UTC
+    - cron: "0 0,4,11 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true にすると投稿せず生成のみ行う"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - run: npm ci
+
+      - name: Generate and post
+        env:
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            npm run post:dry
+          else
+            npm run post
+          fi
+
+      - name: Commit updated posted-log.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/posted-log.json
+          git diff --cached --quiet || git commit -m "chore: update posted-log.json [skip ci]"
+          git push

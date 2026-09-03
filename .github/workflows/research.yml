@@ -1,0 +1,38 @@
+name: Threads trend research
+
+on:
+  schedule:
+    # 06:00 JST (UTC+9) -> 21:00 UTC (前日)。投稿ワークフロー(9:00 JST〜)より前に実行し、
+    # その日の style-examples.json を最新のトレンドで更新しておく。
+    - cron: "0 21 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - run: npm ci
+
+      - name: Research trending posts
+        env:
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: npm run research
+
+      - name: Commit updated style-examples.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/style-examples.json
+          git diff --cached --quiet || git commit -m "chore: refresh style-examples.json from trend research [skip ci]"
+          git push
