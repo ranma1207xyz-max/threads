@@ -2,8 +2,8 @@ name: Threads auto post
 
 on:
   schedule:
-    # 09:00 / 13:00 / 20:00 JST (UTC+9) -> 00:00 / 04:00 / 11:00 UTC
-    - cron: "0 0,4,11 * * *"
+    # 08:00 / 11:00 / 14:00 / 17:00 / 20:00 JST (UTC+9) -> 23:00(前日) / 02:00 / 05:00 / 08:00 / 11:00 UTC
+    - cron: "0 23,2,5,8,11 * * *"
   workflow_dispatch:
     inputs:
       dry_run:

@@ -57,7 +57,7 @@ npm run post           # 実際にThreadsへ投稿する
 ### 6. スケジュール実行
 
 - `.github/workflows/research.yml` が毎朝6:00 JSTに自動リサーチを実行し、`style-examples.json` を更新する。
-- `.github/workflows/post.yml` が1日3回(9:00 / 13:00 / 20:00 JST)自動実行する。
+- `.github/workflows/post.yml` が1日5回(8:00 / 11:00 / 14:00 / 17:00 / 20:00 JST)自動実行する。
 
 頻度はどちらもcron式を編集して調整可能。GitHub Actionsの画面から手動実行(`workflow_dispatch`)もでき、投稿ワークフローでは `dry_run: true` を指定すると投稿せず生成だけ確認できる。
 
