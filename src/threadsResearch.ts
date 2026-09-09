@@ -23,7 +23,7 @@ interface KeywordSearchResponse {
 
 const MIN_TEXT_LENGTH = 30;
 
-async function searchKeyword(keyword: string, limit: number): Promise<TrendingPost[]> {
+export async function searchKeyword(keyword: string, limit: number): Promise<TrendingPost[]> {
   const url = new URL(`${API_BASE}/keyword_search`);
   url.searchParams.set("q", keyword);
   url.searchParams.set("search_type", "TOP");
