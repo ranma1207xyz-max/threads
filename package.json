@@ -6,7 +6,8 @@
   "scripts": {
     "post": "tsx src/index.ts",
     "post:dry": "tsx src/index.ts --dry-run",
-    "research": "tsx src/runResearch.ts"
+    "research": "tsx src/runResearch.ts",
+    "research:products": "tsx src/productResearch.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",

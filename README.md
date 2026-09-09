@@ -14,6 +14,14 @@ Threads(Meta)へのアフィリエイト投稿を自動化するプロジェク�
 - この検索エンドポイントには24時間あたり最大2,200クエリの上限があるが、1日1回・数キーワードの実行では余裕がある。
 - 使うには、下記セットアップの `threads_keyword_search` スコープの認可が必須。
 
+## 商材候補リサーチ(手動実行)
+
+`data/product-research-keywords.json` に登録した悩み別キーワード(例: 「毛穴 美容液 おすすめ」)でThreads公式APIのキーワード検索を行い、実際にユーザーが言及している商品・ブランドを`data/product-research-log.json`に出力する。ASPで商材候補を探す前段の一次リサーチ用。
+
+- 実行: GitHub Actionsの「Threads product research」を手動実行(`workflow_dispatch`)する。定期実行はしない。
+- 出力はテキストの生ログ(投稿本文・ユーザー名・パーマリンク)のみで、ブランド名の自動抽出などは行わない。人(ほにょ・オーナー)が目視で拾い出す想定。
+- ローカルで試す場合は `npm run research:products`。
+
 ## セットアップ
 
 ### 1. Meta Developer アプリの作成 & アクセストークン取得
