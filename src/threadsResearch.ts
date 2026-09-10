@@ -33,7 +33,17 @@ export async function searchKeyword(keyword: string, limit: number): Promise<Tre
   url.searchParams.set("access_token", config.threadsAccessToken);
 
   const response = await fetch(url.toString());
-  const body = (await response.json()) as KeywordSearchResponse;
+  const text = await response.text();
+
+  let body: KeywordSearchResponse;
+  try {
+    body = text ? (JSON.parse(text) as KeywordSearchResponse) : {};
+  } catch {
+    throw new Error(
+      `Threads keyword_search error (${response.status}) for "${keyword}": non-JSON response: ${text.slice(0, 200)}`
+    );
+  }
+
   if (!response.ok) {
     throw new Error(`Threads keyword_search error (${response.status}) for "${keyword}": ${JSON.stringify(body)}`);
   }
@@ -59,7 +69,14 @@ export async function researchTrendingPosts(
   const seenIds = new Set<string>();
 
   for (const keyword of keywords) {
-    const posts = await searchKeyword(keyword, limitPerKeyword);
+    let posts: TrendingPost[];
+    try {
+      posts = await searchKeyword(keyword, limitPerKeyword);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`Skipping keyword "${keyword}": ${message}`);
+      continue;
+    }
     for (const post of posts) {
       if (!seenIds.has(post.id)) {
         seenIds.add(post.id);
