@@ -3,6 +3,15 @@
 Threads(Meta)へのアフィリエイト投稿を自動化するプロジェクト。ジャンルは美容系。
 `threads_keyword_search` を使って「伸びている投稿の型」を自動リサーチし、Claude API でその型を模倣した新規投稿文を商品ごとに生成、公式Threads APIで投稿する。GitHub Actionsで定期実行する。
 
+## 投稿の2段階構成(フック投稿 → 自己返信でリンク)
+
+1回の投稿処理で、Threads投稿は次の2段階になる。
+
+1. **新規投稿**: 生成した「フック」文言(アフィリエイトリンクは含まない)を新規投稿として投稿する。
+2. **自己返信**: STEP1で作成した自分自身の投稿(そのpublish結果のID)に対して、`reply_to_id` を指定した返信として、商品のアフィリエイトリンク(`products.json` の `url`)のみを投稿する。
+
+アフィリエイトリンクが新規投稿の本文に入ることは絶対にない。`products.json` の商品に `url` が設定されていない場合は、投稿処理自体を開始前に中断する(意味のないフック投稿を避けるため)。新規投稿(STEP1)が失敗した場合、またはSTEP1の投稿IDが取得できない場合は、返信(STEP2)は一切実行しない。
+
 ## 「伸びている投稿」の自動リサーチ
 
 `data/research-keywords.json` に登録したキーワード(美容系のジャンル語)ごとに、Threads公式APIのキーワード検索エンドポイント(`GET /keyword_search`, `search_type=TOP`)で公開投稿を取得し、`data/style-examples.json` に自動反映する。
@@ -84,7 +93,7 @@ threads-auto-post/
     posted-log.json         # 投稿履歴(自動更新、重複防止用)
   src/
     config.ts              # 環境変数の読み込み
-    threadsClient.ts        # Threads公式Graph API連携(投稿)
+    threadsClient.ts        # Threads公式Graph API連携(新規投稿・自己返信)
     threadsResearch.ts      # Threads公式Graph API連携(キーワード検索)
     contentGenerator.ts     # Claude APIで投稿文を生成
     runResearch.ts          # 自動リサーチのエントリスクリプト

@@ -21,13 +21,7 @@ async function graphPost(path: string, params: Record<string, string>): Promise<
   return body;
 }
 
-// Two-step publish flow required by the Threads API:
-// 1. create a media container, 2. publish that container.
-export async function postToThreads(text: string, imageUrl?: string): Promise<string> {
-  const containerParams: Record<string, string> = imageUrl
-    ? { media_type: "IMAGE", image_url: imageUrl, text }
-    : { media_type: "TEXT", text };
-
+async function createAndPublishContainer(containerParams: Record<string, string>): Promise<string> {
   const container = await graphPost(`${config.threadsUserId}/threads`, containerParams);
 
   // Meta recommends a short pause before publishing to let the container finish processing.
@@ -38,4 +32,25 @@ export async function postToThreads(text: string, imageUrl?: string): Promise<st
   });
 
   return published.id;
+}
+
+// Two-step publish flow required by the Threads API:
+// 1. create a media container, 2. publish that container.
+export async function postToThreads(text: string, imageUrl?: string): Promise<string> {
+  const containerParams: Record<string, string> = imageUrl
+    ? { media_type: "IMAGE", image_url: imageUrl, text }
+    : { media_type: "TEXT", text };
+
+  return createAndPublishContainer(containerParams);
+}
+
+// Posts a self-reply to an existing Threads post. Uses the same two-step
+// container+publish flow as postToThreads, with reply_to_id set to the
+// parent post's ID (the Threads API's documented way to attach a reply).
+export async function postReplyToThreads(text: string, replyToId: string): Promise<string> {
+  return createAndPublishContainer({
+    media_type: "TEXT",
+    text,
+    reply_to_id: replyToId,
+  });
 }
