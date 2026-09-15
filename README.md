@@ -1,7 +1,7 @@
 # threads-auto-post
 
 Threads(Meta)へのアフィリエイト投稿を自動化するプロジェクト。ジャンルは美容系。
-`threads_keyword_search` を使って「伸びている投稿の型」を自動リサーチし、Claude API でその型を模倣した新規投稿文を商品ごとに生成、公式Threads APIで投稿する。GitHub Actionsで定期実行する。
+ブラウザ自動操作で「伸びている投稿の型」を自動リサーチし、Claude API でその型を模倣した新規投稿文を商品ごとに生成、公式Threads APIで投稿する。GitHub Actionsで定期実行する。
 
 ## 投稿の2段階構成(フック投稿 → 自己返信でリンク)
 
@@ -22,16 +22,32 @@ Threads(Meta)へのアフィリエイト投稿を自動化するプロジェク�
 - 一部の投稿の取得に失敗しても(削除済み投稿など)処理全体は止めない。全件失敗した場合のみエラーにする。
 - 使うには、下記セットアップの `threads_manage_insights` スコープの認可が必須(既存の長期アクセストークンにこのスコープが含まれていない場合、スコープを追加して認可フローを取り直す必要がある)。
 
-## 「伸びている投稿」の自動リサーチ
+## 「伸びている投稿」の自動リサーチ(ブラウザ自動操作方式)
 
-`data/research-keywords.json` に登録したキーワード(美容系のジャンル語)ごとに、Threads公式APIのキーワード検索エンドポイント(`GET /keyword_search`, `search_type=TOP`)で公開投稿を取得し、`data/style-examples.json` に自動反映する。
+Threads公式APIには、他人の投稿の「いいね数」や「返信欄の中身」を取得する手段が無い(自分の投稿の閲覧数等は`threads_manage_insights`で取れるが、他人の投稿には使えない)。そのため、このリサーチはAPIではなく、**ヘッドレスブラウザ(Playwright)でThreadsのWeb版に実際にログインして巡回する方式**で行う。
+
+### 採用条件(すべてAND条件)
+
+`data/research-keywords.json` に登録された5キーワード(`美容`・`美容液`・`肌荒れ`・`ニキビ`・`美肌`。これ以外のキーワードは使わない)ごとに検索し、以下を**すべて**満たす投稿だけを参考例として採用する。
+
+1. 投稿されてから3日以内(Threads上の正確な投稿日時を確認)
+2. いいね数が100以上
+3. 返信欄(リプライ)に、実際にアフィリエイトリンクが存在する
+   - 返信欄の本文からURLを抽出し、実際にそのURLへリクエストしてリダイレクト先を確認したうえで、`data/affiliate-domains.json` に登録済みの提携先(ASP)ドメインと一致した場合のみ「アフィリエイトリンクあり」と判定する(ドメインが一致しない・確認できない場合は採用しない = 推測で判定しない)
+4. 検索に使ったキーワードが指定の5つのいずれかである(検索自体をこの5キーワードだけに限定しているため自動的に満たす)
+
+条件に合う投稿が1件も見つからなかった場合は、条件を緩めて代わりの投稿を採用することはせず、実行ログにその旨を明示し、`style-examples.json` の自動収集分は0件のまま更新する。
+
+### 実行方法とログイン
 
 - 実行: `npm run research`(GitHub Actionsでは `.github/workflows/research.yml` が毎朝6:00 JSTに自動実行し、投稿ワークフローより先に最新の型に更新する)。
-- 30文字未満の短文はノイズとして除外し、キーワードをまたいで重複除去した上で最大30件まで保存する。
-- 自動収集した例には `source: "keyword_search"` と元投稿の `permalink` を付与して保存する。オーナーが手動で追加した例(`source` フィールドなし)は上書きされず残る。
+- ブラウザ操作には、ログイン済みのThreadsセッションが必要。**投稿に使っている本番アカウントと同じアカウント**でログインする(取締役会で承認済み。非公式な自動巡回のため、Threads側の検知次第でこのアカウントに制限がかかるリスクがある点は把握した上で運用する)。
+- 初回セットアップ: ローカルで `npm run research:login` を実行すると、ブラウザが開くので手動でThreadsにログイン(2段階認証があれば完了させる)し、ターミナルでEnterを押すとログイン状態が `data/threads-session.json` に保存される(このファイルはログイン情報そのものに相当するため`.gitignore`済み・絶対にコミットしない)。
+  - 保存した `data/threads-session.json` の中身をbase64化し、GitHub Secretsに `THREADS_SESSION_STATE_B64` として登録する(例: `powershell -c "[Convert]::ToBase64String([IO.File]::ReadAllBytes('data/threads-session.json'))"`)。
+  - Threadsのログインセッションは無期限ではなく、いずれ切れる可能性がある。ワークフローが「セッション切れ」で失敗するようになったら、`npm run research:login` をやり直して `THREADS_SESSION_STATE_B64` を更新すること。
+- 自動収集した例には `source: "threads_browser_research"` に加え、`keyword`(検索キーワード)・`postedAt`(投稿日時)・`likes`(いいね数)・`replyCount`(返信数)・`matchedReplyText`(アフィリエイトリンクが見つかった返信の本文)・`affiliateLink`(確認できたリンクの実際の遷移先)を付与して保存する。オーナーが手動で追加した例(`source` フィールドなし)は上書きされず残る。
 - **注意**: `contentGenerator.ts` のプロンプトは、これらの例を「構成・トーン・テンポの参考」としてのみ使い、文章そのものはコピーせず新規に書き起こすよう指示している。取得した文章をそのまま転載しているわけではないが、著しく似た投稿にならないか気になる場合は生成結果を確認すること。
-- この検索エンドポイントには24時間あたり最大2,200クエリの上限があるが、1日1回・数キーワードの実行では余裕がある。
-- 使うには、下記セットアップの `threads_keyword_search` スコープの認可が必須。
+- `data/affiliate-domains.json` に登録されている提携先(ASP)ドメインは随時見直す(新しいASPと提携したら追加する)。
 
 ## 商材候補リサーチ(手動実行)
 
@@ -47,7 +63,7 @@ Threads(Meta)へのアフィリエイト投稿を自動化するプロジェク�
 
 1. [Meta for Developers](https://developers.facebook.com/) でアプリを作成し、「Threads API」プロダクトを追加する。
 2. あなたのThreadsアカウント(プロ/ビジネスアカウント推奨)を連携する。
-3. `threads_basic`・`threads_content_publish`・`threads_keyword_search`(自動リサーチ機能に必須)・`threads_manage_insights`(閲覧数などの自動記録機能に必須)のスコープでOAuth認可フローを実行し、短期アクセストークンを取得する。
+3. `threads_basic`・`threads_content_publish`・`threads_keyword_search`(商材候補リサーチ機能に必須。伸びている投稿の自動リサーチはブラウザ自動操作方式のためこのスコープ不要)・`threads_manage_insights`(閲覧数などの自動記録機能に必須)のスコープでOAuth認可フローを実行し、短期アクセストークンを取得する。
 4. 短期トークンを長期トークン(60日)に交換する(Meta Graph APIの `access_token` エンドポイント)。
 5. `GET https://graph.threads.net/v1.0/me?fields=id,username&access_token=...` で自分の `id`(= `THREADS_USER_ID`)を確認する。
 6. 長期トークンは60日ごとに更新が必要(リフレッシュ用エンドポイントあり)。GitHub Secretsを都度更新するか、リフレッシュを自動化する仕組みを別途検討する。
@@ -63,19 +79,23 @@ Threads(Meta)へのアフィリエイト投稿を自動化するプロジェク�
 - `THREADS_ACCESS_TOKEN`
 - `THREADS_USER_ID`
 - `ANTHROPIC_API_KEY`
+- `THREADS_SESSION_STATE_B64` — 伸びている投稿の自動リサーチ(ブラウザ自動操作)用。`npm run research:login` で作った `data/threads-session.json` をbase64化した文字列(詳細は上記「伸びている投稿の自動リサーチ」参照)。
 
 ### 4. データの準備
 
 - `data/products.json` — 投稿したいアフィリエイト商品を追加(`id`, `name`, `url`, `points`, 任意で `imageUrl`)。
   - `imageUrl` を指定すると画像付き投稿になる。ローカルファイルは不可で、インターネット上に公開されている画像URL(ASPのバナー画像URL等)を指定する必要がある。未指定の場合はテキストのみの投稿になる。
-- `data/research-keywords.json` — 自動リサーチで検索する美容系キーワードを登録(デフォルトでいくつか入っている。必要に応じて調整)。
+- `data/research-keywords.json` — 自動リサーチで検索するキーワード(`美容`・`美容液`・`肌荒れ`・`ニキビ`・`美肌`の5つに固定。追加・変更する場合は取締役会で合意のうえ調整する)。
+- `data/affiliate-domains.json` — 返信欄のリンクを「アフィリエイトリンク」と判定するための提携先(ASP)ドメイン一覧。新しいASPと提携したら追加する。
 - `data/style-examples.json` — 自動リサーチ(`npm run research`)で自動的に埋まる。手動で気に入った投稿例を追加したい場合はコピペで追記してもよい(`source`フィールドを付けなければ自動リサーチで上書きされない)。
 
 ### 5. ローカルでの試し実行(任意)
 
 ```bash
 npm install
+npx playwright install --with-deps chromium   # ブラウザ自動操作用のChromiumを取得
 cp .env.example .env   # .envに各種キーを入力
+npm run research:login # 初回のみ: 手動でThreadsにログインし、セッションを保存
 npm run research       # 伸びている投稿を自動リサーチしてstyle-examples.jsonを更新
 npm run post:dry       # 投稿文を生成するだけ(実際には投稿しない)
 npm run post           # 実際にThreadsへ投稿する
@@ -99,20 +119,24 @@ npm run post           # 実際にThreadsへ投稿する
 threads-auto-post/
   data/
     products.json           # アフィリエイト商品一覧
-    research-keywords.json  # 自動リサーチで検索するキーワード
+    research-keywords.json  # 自動リサーチで検索するキーワード(5つ固定)
+    affiliate-domains.json  # 返信欄のリンクをアフィリエイトリンクと判定するASPドメイン一覧
     style-examples.json     # 伸びている投稿の型(自動リサーチ+手動追記)
     posted-log.json         # 投稿履歴(自動更新、重複防止用)
     insights-log.json       # 閲覧数などのスナップショット履歴(自動更新)
+    threads-session.json    # ブラウザ自動操作用のログイン済みセッション(gitignore対象・要ローカル生成)
   src/
     config.ts              # 環境変数の読み込み
     threadsClient.ts        # Threads公式Graph API連携(新規投稿・自己返信・インサイト取得)
-    threadsResearch.ts      # Threads公式Graph API連携(キーワード検索)
+    threadsResearch.ts      # Threads公式Graph API連携(キーワード検索。商材候補リサーチ専用)
+    threadsScraper.ts       # ブラウザ自動操作(Playwright)によるThreads巡回・条件判定
+    threadsLogin.ts         # ブラウザ自動操作用ログインセッションの作成スクリプト
     contentGenerator.ts     # Claude APIで投稿文を生成
-    runResearch.ts          # 自動リサーチのエントリスクリプト
+    runResearch.ts          # 伸びている投稿の自動リサーチのエントリスクリプト
     index.ts                # 投稿のエントリスクリプト
     collectInsights.ts      # 閲覧数などの自動記録のエントリスクリプト
   .github/workflows/
-    research.yml   # 自動リサーチのスケジュール実行
+    research.yml   # 自動リサーチのスケジュール実行(ブラウザ自動操作)
     post.yml       # 投稿のスケジュール実行
     insights.yml   # 閲覧数などの自動記録のスケジュール実行
 ```

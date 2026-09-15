@@ -22,11 +22,15 @@ jobs:
 
       - run: npm install
 
-      - name: Research trending posts
-        env:
-          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
-          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Restore logged-in Threads session
+        run: |
+          mkdir -p data
+          echo "${{ secrets.THREADS_SESSION_STATE_B64 }}" | base64 -d > data/threads-session.json
+
+      - name: Research trending posts (browser-based)
         run: npm run research
 
       - name: Commit updated style-examples.json

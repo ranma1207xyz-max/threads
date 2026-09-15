@@ -1,0 +1,19 @@
+{
+  "_comment": "返信欄のURLを実際に開いて(リダイレクトを追跡して)、最終的な行き先ドメインがここに載っているものと一致した場合のみ「アフィリエイトリンクあり」と判定する。ここにないドメインは対象外(推測で判定しない)。日本の主要ASP(アフィリエイト・サービス・プロバイダ)の計測用ドメインを登録する。",
+  "domains": [
+    "a.r10.to",
+    "hb.afl.rakuten.co.jp",
+    "link.rakuten.co.jp",
+    "af.moshimo.com",
+    "px.a8.net",
+    "a8.net",
+    "ck.jp.ap.valuecommerce.com",
+    "valuecommerce.com",
+    "track.affiliate-b.com",
+    "afi.j-a-net.jp",
+    "click.linksynergy.com",
+    "amzn.to",
+    "www.amazon.co.jp"
+  ],
+  "affiliateQueryParams": ["tag", "a8mat", "vc_url", "pid", "aff_id", "afid"]
+}

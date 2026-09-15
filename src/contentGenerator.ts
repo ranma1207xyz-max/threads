@@ -18,6 +18,13 @@ export interface StyleExample {
   username?: string;
   permalink?: string;
   fetchedAt?: string;
+  // Fields populated only by the browser-based research (source: "threads_browser_research").
+  keyword?: string;
+  postedAt?: string;
+  likes?: number;
+  replyCount?: number;
+  matchedReplyText?: string;
+  affiliateLink?: string;
 }
 
 const SYSTEM_PROMPT = `あなたはThreads(Meta)向けの日本語アフィリエイト投稿を書くコピーライターです。扱うジャンルは美容系、その中でも美容液・肌関連(スキンケア)商材(化粧水・美容液・クリーム・毛穴ケア等)です。

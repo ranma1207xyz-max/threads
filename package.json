@@ -7,12 +7,14 @@
     "post": "tsx src/index.ts",
     "post:dry": "tsx src/index.ts --dry-run",
     "research": "tsx src/runResearch.ts",
+    "research:login": "tsx src/threadsLogin.ts",
     "research:products": "tsx src/productResearch.ts",
     "insights": "tsx src/collectInsights.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "playwright": "^1.48.0"
   },
   "devDependencies": {
     "@types/node": "^22.7.5",
