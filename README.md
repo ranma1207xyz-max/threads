@@ -12,6 +12,16 @@ Threads(Meta)へのアフィリエイト投稿を自動化するプロジェク�
 
 アフィリエイトリンクが新規投稿の本文に入ることは絶対にない。`products.json` の商品に `url` が設定されていない場合は、投稿処理自体を開始前に中断する(意味のないフック投稿を避けるため)。新規投稿(STEP1)が失敗した場合、またはSTEP1の投稿IDが取得できない場合は、返信(STEP2)は一切実行しない。
 
+## 閲覧数などの自動記録(インサイト収集)
+
+投稿した各Threads投稿について、閲覧数(views)・いいね・返信・リポスト・引用・シェアの数を、Threads公式APIのInsightsエンドポイント(`GET /{投稿ID}/insights`)経由で取得し、`data/insights-log.json` に時系列のスナップショットとして追記していく。
+
+- 実行: `npm run insights`(GitHub Actionsでは `.github/workflows/insights.yml` が毎日21:30 JSTに自動実行する)。
+- 対象は直近30日以内に投稿したものに限定する(古い投稿まで毎回取り直すと際限なく重くなるため)。
+- 1回の実行につき、対象の投稿ごとに1件のスナップショット(取得時点の累計値)を追記する形式。上書きではなく追記なので、同じ投稿の数字が時間とともにどう伸びたかを後から追える。
+- 一部の投稿の取得に失敗しても(削除済み投稿など)処理全体は止めない。全件失敗した場合のみエラーにする。
+- 使うには、下記セットアップの `threads_manage_insights` スコープの認可が必須(既存の長期アクセストークンにこのスコープが含まれていない場合、スコープを追加して認可フローを取り直す必要がある)。
+
 ## 「伸びている投稿」の自動リサーチ
 
 `data/research-keywords.json` に登録したキーワード(美容系のジャンル語)ごとに、Threads公式APIのキーワード検索エンドポイント(`GET /keyword_search`, `search_type=TOP`)で公開投稿を取得し、`data/style-examples.json` に自動反映する。
@@ -37,7 +47,7 @@ Threads(Meta)へのアフィリエイト投稿を自動化するプロジェク�
 
 1. [Meta for Developers](https://developers.facebook.com/) でアプリを作成し、「Threads API」プロダクトを追加する。
 2. あなたのThreadsアカウント(プロ/ビジネスアカウント推奨)を連携する。
-3. `threads_basic`・`threads_content_publish`・`threads_keyword_search`(自動リサーチ機能に必須)のスコープでOAuth認可フローを実行し、短期アクセストークンを取得する。
+3. `threads_basic`・`threads_content_publish`・`threads_keyword_search`(自動リサーチ機能に必須)・`threads_manage_insights`(閲覧数などの自動記録機能に必須)のスコープでOAuth認可フローを実行し、短期アクセストークンを取得する。
 4. 短期トークンを長期トークン(60日)に交換する(Meta Graph APIの `access_token` エンドポイント)。
 5. `GET https://graph.threads.net/v1.0/me?fields=id,username&access_token=...` で自分の `id`(= `THREADS_USER_ID`)を確認する。
 6. 長期トークンは60日ごとに更新が必要(リフレッシュ用エンドポイントあり)。GitHub Secretsを都度更新するか、リフレッシュを自動化する仕組みを別途検討する。
@@ -75,8 +85,9 @@ npm run post           # 実際にThreadsへ投稿する
 
 - `.github/workflows/research.yml` が毎朝6:00 JSTに自動リサーチを実行し、`style-examples.json` を更新する。
 - `.github/workflows/post.yml` が1日5回(8:00 / 11:00 / 14:00 / 17:00 / 20:00 JST)自動実行する。
+- `.github/workflows/insights.yml` が毎日21:30 JSTに閲覧数などを自動記録する。
 
-頻度はどちらもcron式を編集して調整可能。GitHub Actionsの画面から手動実行(`workflow_dispatch`)もでき、投稿ワークフローでは `dry_run: true` を指定すると投稿せず生成だけ確認できる。
+頻度はどれもcron式を編集して調整可能。GitHub Actionsの画面から手動実行(`workflow_dispatch`)もでき、投稿ワークフローでは `dry_run: true` を指定すると投稿せず生成だけ確認できる。
 
 ## 法令順守について
 
@@ -91,14 +102,17 @@ threads-auto-post/
     research-keywords.json  # 自動リサーチで検索するキーワード
     style-examples.json     # 伸びている投稿の型(自動リサーチ+手動追記)
     posted-log.json         # 投稿履歴(自動更新、重複防止用)
+    insights-log.json       # 閲覧数などのスナップショット履歴(自動更新)
   src/
     config.ts              # 環境変数の読み込み
-    threadsClient.ts        # Threads公式Graph API連携(新規投稿・自己返信)
+    threadsClient.ts        # Threads公式Graph API連携(新規投稿・自己返信・インサイト取得)
     threadsResearch.ts      # Threads公式Graph API連携(キーワード検索)
     contentGenerator.ts     # Claude APIで投稿文を生成
     runResearch.ts          # 自動リサーチのエントリスクリプト
     index.ts                # 投稿のエントリスクリプト
+    collectInsights.ts      # 閲覧数などの自動記録のエントリスクリプト
   .github/workflows/
-    research.yml  # 自動リサーチのスケジュール実行
+    research.yml   # 自動リサーチのスケジュール実行
     post.yml       # 投稿のスケジュール実行
+    insights.yml   # 閲覧数などの自動記録のスケジュール実行
 ```

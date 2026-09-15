@@ -1,0 +1,38 @@
+name: Threads insights collection
+
+on:
+  schedule:
+    # 21:30 JST (UTC+9) -> 12:30 UTC. Runs after the day's last post (20:00 JST)
+    # so the day's posts have had time to accumulate some views.
+    - cron: "30 12 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - run: npm install
+
+      - name: Collect insights
+        env:
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: npm run insights
+
+      - name: Commit updated insights-log.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/insights-log.json
+          git diff --cached --quiet || git commit -m "chore: update insights-log.json [skip ci]"
+          git push

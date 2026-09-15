@@ -21,6 +21,21 @@ async function graphPost(path: string, params: Record<string, string>): Promise<
   return body;
 }
 
+async function graphGet(path: string, params: Record<string, string>): Promise<any> {
+  const url = new URL(`${API_BASE}/${path}`);
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, value);
+  }
+  url.searchParams.set("access_token", config.threadsAccessToken);
+
+  const response = await fetch(url.toString());
+  const body = await response.json();
+  if (!response.ok) {
+    throw new Error(`Threads API error (${response.status}): ${JSON.stringify(body)}`);
+  }
+  return body;
+}
+
 async function createAndPublishContainer(containerParams: Record<string, string>): Promise<string> {
   const container = await graphPost(`${config.threadsUserId}/threads`, containerParams);
 
@@ -53,4 +68,31 @@ export async function postReplyToThreads(text: string, replyToId: string): Promi
     text,
     reply_to_id: replyToId,
   });
+}
+
+export interface ThreadsInsights {
+  views?: number;
+  likes?: number;
+  replies?: number;
+  reposts?: number;
+  quotes?: number;
+  shares?: number;
+}
+
+const INSIGHT_METRICS = ["views", "likes", "replies", "reposts", "quotes", "shares"];
+
+// Fetches lifetime-to-date engagement metrics for a single Threads post via
+// the Insights endpoint. Requires the threads_manage_insights scope on the
+// access token.
+export async function getMediaInsights(mediaId: string): Promise<ThreadsInsights> {
+  const body = await graphGet(`${mediaId}/insights`, { metric: INSIGHT_METRICS.join(",") });
+
+  const insights: ThreadsInsights = {};
+  for (const item of body.data ?? []) {
+    const value = item.values?.[0]?.value;
+    if (typeof value === "number" && INSIGHT_METRICS.includes(item.name)) {
+      insights[item.name as keyof ThreadsInsights] = value;
+    }
+  }
+  return insights;
 }

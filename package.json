@@ -7,7 +7,8 @@
     "post": "tsx src/index.ts",
     "post:dry": "tsx src/index.ts --dry-run",
     "research": "tsx src/runResearch.ts",
-    "research:products": "tsx src/productResearch.ts"
+    "research:products": "tsx src/productResearch.ts",
+    "insights": "tsx src/collectInsights.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
