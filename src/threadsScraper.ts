@@ -118,22 +118,6 @@ export async function searchKeywordCandidates(page: Page, keyword: string): Prom
   const cutoff = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
 
   const rawPosts: RawPost[] = await page.evaluate(() => {
-    // Finds the smallest ancestor of a post's timestamp link that still
-    // contains only that one post's own permalink — i.e. the DOM subtree for
-    // exactly one post, without bleeding into a neighboring post/reply that
-    // happens to share a further-out wrapper element.
-    function findPostContainer(anchor: HTMLElement): HTMLElement | null {
-      let node = anchor.parentElement;
-      let best: HTMLElement | null = node;
-      for (let hops = 0; hops < 14 && node; hops++) {
-        const count = node.querySelectorAll('a[href*="/post/"]').length;
-        if (count > 1) break;
-        best = node;
-        node = node.parentElement;
-      }
-      return best;
-    }
-
     const results: RawPost[] = [];
     const permalinkAnchors = Array.from(document.querySelectorAll('a[href*="/post/"]')) as HTMLElement[];
     const seen = new Set<string>();
@@ -145,7 +129,21 @@ export async function searchKeywordCandidates(page: Page, keyword: string): Prom
       if (!/\d{4}年\d{1,2}月\d{1,2}日/.test(timestampLabel)) continue;
       seen.add(href);
 
-      const container = findPostContainer(anchor);
+      // Inlined (rather than a named helper function) because this callback
+      // is serialized to its own source text and run in the browser in
+      // isolation — a separate helper would need its own definition shipped
+      // along with it, which page.evaluate does not do automatically, and
+      // tsx's esbuild transform additionally emits a `__name(...)` call for
+      // named functions that references a module-level helper not present
+      // in that serialized text, causing a ReferenceError in the browser.
+      let node: HTMLElement | null = anchor.parentElement;
+      let container: HTMLElement | null = node;
+      for (let hops = 0; hops < 14 && node; hops++) {
+        const count = node.querySelectorAll('a[href*="/post/"]').length;
+        if (count > 1) break;
+        container = node;
+        node = node.parentElement;
+      }
       if (!container) continue;
 
       const usernameLink = container.querySelector('a[href^="/@"]:not([href*="/post/"])') as HTMLElement | null;
@@ -238,21 +236,6 @@ export async function checkRepliesForAffiliateLink(
   const rootPath = new URL(candidate.permalink).pathname;
 
   const replyTexts: string[] = await page.evaluate((rootPathArg) => {
-    // Same helper as in searchKeywordCandidates — duplicated because this
-    // callback is serialized and run in the browser independently (see note
-    // on searchKeywordCandidates above).
-    function findPostContainer(anchor: HTMLElement): HTMLElement | null {
-      let node = anchor.parentElement;
-      let best: HTMLElement | null = node;
-      for (let hops = 0; hops < 14 && node; hops++) {
-        const count = node.querySelectorAll('a[href*="/post/"]').length;
-        if (count > 1) break;
-        best = node;
-        node = node.parentElement;
-      }
-      return best;
-    }
-
     const texts: string[] = [];
     const seen = new Set<string>();
     const anchors = Array.from(document.querySelectorAll('a[href*="/post/"]')) as HTMLElement[];
@@ -264,7 +247,17 @@ export async function checkRepliesForAffiliateLink(
       if (!/\d{4}年\d{1,2}月\d{1,2}日/.test(timestampLabel)) continue;
       seen.add(href);
 
-      const container = findPostContainer(anchor);
+      // Inlined for the same reason as in searchKeywordCandidates above —
+      // no named helper function, since it would need its own definition
+      // shipped alongside this serialized callback.
+      let node: HTMLElement | null = anchor.parentElement;
+      let container: HTMLElement | null = node;
+      for (let hops = 0; hops < 14 && node; hops++) {
+        const count = node.querySelectorAll('a[href*="/post/"]').length;
+        if (count > 1) break;
+        container = node;
+        node = node.parentElement;
+      }
       if (!container) continue;
       const body = container.innerText.trim();
       if (body) texts.push(body);
