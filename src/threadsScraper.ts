@@ -217,6 +217,10 @@ export async function searchKeywordCandidates(page: Page, keyword: string): Prom
     return results;
   }, TIMESTAMP_LABEL_SOURCE);
 
+  if (DEBUG_SCREENSHOTS) {
+    console.log(`  [debug] rawPosts for "${keyword}" (${rawPosts.length}): ${JSON.stringify(rawPosts.map((r) => ({ permalink: r.permalink, timestampLabel: r.timestampLabel, likesLabel: r.likesLabel })))}`);
+  }
+
   const candidates: CandidatePost[] = [];
   for (const raw of rawPosts) {
     const postedAt = parseThreadsTimestamp(raw.timestampLabel);
