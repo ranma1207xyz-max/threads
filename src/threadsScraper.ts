@@ -127,6 +127,21 @@ export async function searchKeywordCandidates(page: Page, keyword: string): Prom
   if (DEBUG_SCREENSHOTS) {
     mkdirSync(DEBUG_DIR, { recursive: true });
     await page.screenshot({ path: `${DEBUG_DIR}/search-${keyword}.png`, fullPage: true });
+
+    // Diagnostic: confirm/refute the hypothesis that posts within roughly the
+    // last week render a short relative aria-label (e.g. "4日") instead of
+    // the full "◯年◯月◯日..." string parseThreadsTimestamp requires — which
+    // would silently drop otherwise-qualifying recent posts before the date
+    // cutoff is ever applied.
+    const sampleLabels = await page.evaluate(() => {
+      const anchors = Array.from(document.querySelectorAll('a[href*="/post/"]')) as HTMLElement[];
+      return anchors.slice(0, 30).map((a) => ({
+        href: a.getAttribute("href"),
+        ariaLabel: a.getAttribute("aria-label"),
+        innerText: a.innerText,
+      }));
+    });
+    console.log(`  [debug] timestamp anchor samples for "${keyword}": ${JSON.stringify(sampleLabels)}`);
   }
 
   const cutoff = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
