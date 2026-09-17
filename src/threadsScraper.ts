@@ -211,7 +211,7 @@ export async function searchKeywordCandidates(page: Page, keyword: string): Prom
       if (debugMode) {
         const buttons = Array.from(container.querySelectorAll('button, [role="button"]')) as HTMLElement[];
         debugButtons = JSON.stringify(
-          buttons.slice(0, 8).map((b) => ({
+          buttons.slice(-8).map((b) => ({
             text: b.innerText.trim(),
             ariaLabel: b.getAttribute("aria-label"),
             imgAlt: b.querySelector("img")?.getAttribute("alt") ?? null,
