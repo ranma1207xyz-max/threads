@@ -43,6 +43,7 @@ interface RawPost {
   text: string;
   timestampLabel: string;
   likesLabel: string;
+  debugButtons?: string;
 }
 
 function loadAffiliateDomains(): AffiliateDomainsConfig {
@@ -166,7 +167,7 @@ export async function searchKeywordCandidates(page: Page, keyword: string): Prom
 
   const cutoff = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
 
-  const rawPosts: RawPost[] = await page.evaluate((labelPattern) => {
+  const rawPosts: RawPost[] = await page.evaluate(({ labelPattern, debugMode }) => {
     const timestampRegex = new RegExp(labelPattern);
     const results: RawPost[] = [];
     const permalinkAnchors = Array.from(document.querySelectorAll('a[href*="/post/"]')) as HTMLElement[];
@@ -206,19 +207,36 @@ export async function searchKeywordCandidates(page: Page, keyword: string): Prom
         if (likeButton) likesLabel = likeButton.innerText.trim() || "0";
       }
 
+      let debugButtons: string | undefined;
+      if (debugMode) {
+        const buttons = Array.from(container.querySelectorAll('button, [role="button"]')) as HTMLElement[];
+        debugButtons = JSON.stringify(
+          buttons.slice(0, 8).map((b) => ({
+            text: b.innerText.trim(),
+            ariaLabel: b.getAttribute("aria-label"),
+            imgAlt: b.querySelector("img")?.getAttribute("alt") ?? null,
+            svgAriaLabel: b.querySelector("svg")?.getAttribute("aria-label") ?? null,
+          }))
+        );
+      }
+
       const skipTexts = new Set([username, "もっと見る", "投稿者", timestampLabel]);
       const textNodes = Array.from(container.querySelectorAll("span"))
         .map((el) => (el as HTMLElement).innerText.trim())
         .filter((t) => t.length > 3 && !skipTexts.has(t) && !/^[\d,.]+万?$/.test(t));
       const text = Array.from(new Set(textNodes)).join("\n");
 
-      results.push({ permalink: href, username, text, timestampLabel, likesLabel });
+      results.push({ permalink: href, username, text, timestampLabel, likesLabel, debugButtons });
     }
     return results;
-  }, TIMESTAMP_LABEL_SOURCE);
+  }, { labelPattern: TIMESTAMP_LABEL_SOURCE, debugMode: DEBUG_SCREENSHOTS });
 
   if (DEBUG_SCREENSHOTS) {
-    console.log(`  [debug] rawPosts for "${keyword}" (${rawPosts.length}): ${JSON.stringify(rawPosts.map((r) => ({ permalink: r.permalink, timestampLabel: r.timestampLabel, likesLabel: r.likesLabel })))}`);
+    console.log(
+      `  [debug] rawPosts for "${keyword}" (${rawPosts.length}): ${JSON.stringify(
+        rawPosts.map((r) => ({ permalink: r.permalink, timestampLabel: r.timestampLabel, likesLabel: r.likesLabel, debugButtons: r.debugButtons }))
+      )}`
+    );
   }
 
   const candidates: CandidatePost[] = [];
