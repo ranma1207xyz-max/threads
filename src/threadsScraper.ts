@@ -49,16 +49,51 @@ function loadAffiliateDomains(): AffiliateDomainsConfig {
   return JSON.parse(readFileSync("data/affiliate-domains.json", "utf-8")) as AffiliateDomainsConfig;
 }
 
-// Threads renders the accessible timestamp as a full Japanese date/time string,
-// e.g. "2026年8月28日金曜日 18:29". This is far more reliable for the lookback
-// cutoff than the relative "◯時間前" label, which Threads also renders and
-// which we deliberately ignore.
+// Threads' timestamp link has no useful aria-label (always null in practice)
+// — the actual timestamp is the anchor's visible text, which is relative
+// ("3分", "7時間", "4日") for roughly the first week and switches to an
+// absolute "2026/08/30" (date only, no time of day) after that. There's no
+// reliable "◯年◯月◯日..." full-date string in the wild despite what earlier
+// code assumed — that format never matched, which is why every post used to
+// get silently dropped before the lookback cutoff was ever applied.
 function parseThreadsTimestamp(label: string): Date | null {
-  const match = label.match(/(\d{4})年(\d{1,2})月(\d{1,2})日.*?(\d{1,2}):(\d{2})/);
-  if (!match) return null;
-  const [, y, mo, d, h, mi] = match;
-  return new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi));
+  const trimmed = label.trim();
+
+  const minuteMatch = trimmed.match(/^(\d+)分$/);
+  if (minuteMatch) return new Date(Date.now() - Number(minuteMatch[1]) * 60 * 1000);
+
+  const hourMatch = trimmed.match(/^(\d+)時間$/);
+  if (hourMatch) return new Date(Date.now() - Number(hourMatch[1]) * 60 * 60 * 1000);
+
+  const dayMatch = trimmed.match(/^(\d+)日$/);
+  if (dayMatch) return new Date(Date.now() - Number(dayMatch[1]) * 24 * 60 * 60 * 1000);
+
+  const weekMatch = trimmed.match(/^(\d+)週間?$/);
+  if (weekMatch) return new Date(Date.now() - Number(weekMatch[1]) * 7 * 24 * 60 * 60 * 1000);
+
+  // Date-only, no time of day given — use noon so it lands solidly on that
+  // calendar day regardless of the reader's/cutoff's own time-of-day.
+  const slashMatch = trimmed.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+  if (slashMatch) {
+    const [, y, mo, d] = slashMatch;
+    return new Date(Number(y), Number(mo) - 1, Number(d), 12, 0);
+  }
+
+  // Kept in case some accounts/locales still render this full format.
+  const fullMatch = trimmed.match(/(\d{4})年(\d{1,2})月(\d{1,2})日.*?(\d{1,2}):(\d{2})/);
+  if (fullMatch) {
+    const [, y, mo, d, h, mi] = fullMatch;
+    return new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi));
+  }
+
+  return null;
 }
+
+// Matches any of the timestamp text formats parseThreadsTimestamp handles.
+// Inlined into each page.evaluate() callback below (see the note above
+// searchKeywordCandidates on why shared helpers can't be imported there).
+const TIMESTAMP_LABEL_SOURCE =
+  "^\\d+(分|時間|日|週間?)$|^\\d{4}/\\d{1,2}/\\d{1,2}$|\\d{4}年\\d{1,2}月\\d{1,2}日";
 
 function extractPostIdFromPermalink(permalink: string): string {
   const match = permalink.match(/\/post\/([^/?#]+)/);
@@ -127,26 +162,12 @@ export async function searchKeywordCandidates(page: Page, keyword: string): Prom
   if (DEBUG_SCREENSHOTS) {
     mkdirSync(DEBUG_DIR, { recursive: true });
     await page.screenshot({ path: `${DEBUG_DIR}/search-${keyword}.png`, fullPage: true });
-
-    // Diagnostic: confirm/refute the hypothesis that posts within roughly the
-    // last week render a short relative aria-label (e.g. "4日") instead of
-    // the full "◯年◯月◯日..." string parseThreadsTimestamp requires — which
-    // would silently drop otherwise-qualifying recent posts before the date
-    // cutoff is ever applied.
-    const sampleLabels = await page.evaluate(() => {
-      const anchors = Array.from(document.querySelectorAll('a[href*="/post/"]')) as HTMLElement[];
-      return anchors.slice(0, 30).map((a) => ({
-        href: a.getAttribute("href"),
-        ariaLabel: a.getAttribute("aria-label"),
-        innerText: a.innerText,
-      }));
-    });
-    console.log(`  [debug] timestamp anchor samples for "${keyword}": ${JSON.stringify(sampleLabels)}`);
   }
 
   const cutoff = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
 
-  const rawPosts: RawPost[] = await page.evaluate(() => {
+  const rawPosts: RawPost[] = await page.evaluate((labelPattern) => {
+    const timestampRegex = new RegExp(labelPattern);
     const results: RawPost[] = [];
     const permalinkAnchors = Array.from(document.querySelectorAll('a[href*="/post/"]')) as HTMLElement[];
     const seen = new Set<string>();
@@ -154,8 +175,8 @@ export async function searchKeywordCandidates(page: Page, keyword: string): Prom
     for (const anchor of permalinkAnchors) {
       const href = anchor.getAttribute("href") || "";
       if (seen.has(href)) continue;
-      const timestampLabel = anchor.getAttribute("aria-label") || anchor.innerText || "";
-      if (!/\d{4}年\d{1,2}月\d{1,2}日/.test(timestampLabel)) continue;
+      const timestampLabel = (anchor.getAttribute("aria-label") || anchor.innerText || "").trim();
+      if (!timestampRegex.test(timestampLabel)) continue;
       seen.add(href);
 
       // Inlined (rather than a named helper function) because this callback
@@ -194,7 +215,7 @@ export async function searchKeywordCandidates(page: Page, keyword: string): Prom
       results.push({ permalink: href, username, text, timestampLabel, likesLabel });
     }
     return results;
-  });
+  }, TIMESTAMP_LABEL_SOURCE);
 
   const candidates: CandidatePost[] = [];
   for (const raw of rawPosts) {
@@ -264,7 +285,8 @@ export async function checkRepliesForAffiliateLink(
 
   const rootPath = new URL(candidate.permalink).pathname;
 
-  const replyTexts: string[] = await page.evaluate((rootPathArg) => {
+  const replyTexts: string[] = await page.evaluate(({ rootPathArg, labelPattern }) => {
+    const timestampRegex = new RegExp(labelPattern);
     const texts: string[] = [];
     const seen = new Set<string>();
     const anchors = Array.from(document.querySelectorAll('a[href*="/post/"]')) as HTMLElement[];
@@ -272,8 +294,8 @@ export async function checkRepliesForAffiliateLink(
     for (const anchor of anchors) {
       const href = anchor.getAttribute("href") || "";
       if (href === rootPathArg || seen.has(href)) continue;
-      const timestampLabel = anchor.getAttribute("aria-label") || anchor.innerText || "";
-      if (!/\d{4}年\d{1,2}月\d{1,2}日/.test(timestampLabel)) continue;
+      const timestampLabel = (anchor.getAttribute("aria-label") || anchor.innerText || "").trim();
+      if (!timestampRegex.test(timestampLabel)) continue;
       seen.add(href);
 
       // Inlined for the same reason as in searchKeywordCandidates above —
@@ -292,7 +314,7 @@ export async function checkRepliesForAffiliateLink(
       if (body) texts.push(body);
     }
     return texts;
-  }, rootPath);
+  }, { rootPathArg: rootPath, labelPattern: TIMESTAMP_LABEL_SOURCE });
 
   const replyCount = replyTexts.length;
 
