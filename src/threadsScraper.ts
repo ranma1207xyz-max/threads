@@ -126,6 +126,27 @@ export async function searchKeywordCandidates(page: Page, keyword: string): Prom
   if (DEBUG_SCREENSHOTS) {
     mkdirSync(DEBUG_DIR, { recursive: true });
     await page.screenshot({ path: `${DEBUG_DIR}/search-${keyword}.png`, fullPage: true });
+
+    // Diagnostic: this search defaults to Threads' "top results" tab, which
+    // mixes in old-but-popular posts (see search-<keyword>.png). Check
+    // whether a "recent" tab exists and what URL it actually uses, since the
+    // 3-day-old + 100-likes condition is much more likely to be satisfied by
+    // sorting on recency first rather than filtering top-results by date.
+    try {
+      const recentTab = page.getByRole("tab", { name: "最近" }).or(page.getByText("最近", { exact: true }));
+      if (await recentTab.first().isVisible({ timeout: 3000 })) {
+        await recentTab.first().click();
+        await page.waitForTimeout(2000);
+        console.log(`  [debug] "最近" tab URL for "${keyword}": ${page.url()}`);
+        await page.screenshot({ path: `${DEBUG_DIR}/search-${keyword}-recent.png`, fullPage: true });
+      } else {
+        console.log(`  [debug] No "最近" tab visible for "${keyword}".`);
+      }
+    } catch (error) {
+      console.log(
+        `  [debug] Could not check "最近" tab for "${keyword}": ${error instanceof Error ? error.message : error}`
+      );
+    }
   }
 
   const cutoff = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
