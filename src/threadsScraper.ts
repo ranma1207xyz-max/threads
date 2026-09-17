@@ -43,7 +43,6 @@ interface RawPost {
   text: string;
   timestampLabel: string;
   likesLabel: string;
-  debugButtons?: string;
 }
 
 function loadAffiliateDomains(): AffiliateDomainsConfig {
@@ -167,7 +166,7 @@ export async function searchKeywordCandidates(page: Page, keyword: string): Prom
 
   const cutoff = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
 
-  const rawPosts: RawPost[] = await page.evaluate(({ labelPattern, debugMode }) => {
+  const rawPosts: RawPost[] = await page.evaluate((labelPattern) => {
     const timestampRegex = new RegExp(labelPattern);
     const results: RawPost[] = [];
     const permalinkAnchors = Array.from(document.querySelectorAll('a[href*="/post/"]')) as HTMLElement[];
@@ -200,25 +199,12 @@ export async function searchKeywordCandidates(page: Page, keyword: string): Prom
       const usernameLink = container.querySelector('a[href^="/@"]:not([href*="/post/"])') as HTMLElement | null;
       const username = usernameLink ? usernameLink.innerText.trim() : "";
 
-      let likesLabel = "0";
-      const likeImg = container.querySelector('img[alt="「いいね！」"], [aria-label="「いいね！」"]');
-      if (likeImg) {
-        const likeButton = (likeImg.closest("button") || likeImg.closest('[role="button"]')) as HTMLElement | null;
-        if (likeButton) likesLabel = likeButton.innerText.trim() || "0";
-      }
-
-      let debugButtons: string | undefined;
-      if (debugMode) {
-        const buttons = Array.from(container.querySelectorAll('button, [role="button"]')) as HTMLElement[];
-        debugButtons = JSON.stringify(
-          buttons.slice(-8).map((b) => ({
-            text: b.innerText.trim(),
-            ariaLabel: b.getAttribute("aria-label"),
-            imgAlt: b.querySelector("img")?.getAttribute("alt") ?? null,
-            svgAriaLabel: b.querySelector("svg")?.getAttribute("aria-label") ?? null,
-          }))
-        );
-      }
+      // Threads' action-bar icons (like/reply/repost/share, in that fixed
+      // order) carry no aria-label or alt text at all — the count is bare
+      // button text, blank when it's 0. They're reliably the last 4 buttons
+      // in the post's container, after any profile/follow/media buttons.
+      const actionButtons = Array.from(container.querySelectorAll('button, [role="button"]')).slice(-4) as HTMLElement[];
+      const likesLabel = actionButtons[0]?.innerText.trim() || "0";
 
       const skipTexts = new Set([username, "もっと見る", "投稿者", timestampLabel]);
       const textNodes = Array.from(container.querySelectorAll("span"))
@@ -226,18 +212,10 @@ export async function searchKeywordCandidates(page: Page, keyword: string): Prom
         .filter((t) => t.length > 3 && !skipTexts.has(t) && !/^[\d,.]+万?$/.test(t));
       const text = Array.from(new Set(textNodes)).join("\n");
 
-      results.push({ permalink: href, username, text, timestampLabel, likesLabel, debugButtons });
+      results.push({ permalink: href, username, text, timestampLabel, likesLabel });
     }
     return results;
-  }, { labelPattern: TIMESTAMP_LABEL_SOURCE, debugMode: DEBUG_SCREENSHOTS });
-
-  if (DEBUG_SCREENSHOTS) {
-    console.log(
-      `  [debug] rawPosts for "${keyword}" (${rawPosts.length}): ${JSON.stringify(
-        rawPosts.map((r) => ({ permalink: r.permalink, timestampLabel: r.timestampLabel, likesLabel: r.likesLabel, debugButtons: r.debugButtons }))
-      )}`
-    );
-  }
+  }, TIMESTAMP_LABEL_SOURCE);
 
   const candidates: CandidatePost[] = [];
   for (const raw of rawPosts) {
