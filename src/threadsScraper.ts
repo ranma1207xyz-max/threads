@@ -11,7 +11,7 @@ const DEBUG_DIR = "debug";
 
 const SESSION_STATE_PATH = "data/threads-session.json";
 const SEARCH_URL = "https://www.threads.com/search";
-const LOOKBACK_DAYS = 3;
+const LOOKBACK_DAYS = 7;
 const MIN_LIKES = 100;
 const MAX_SCROLLS = 6;
 
@@ -50,7 +50,7 @@ function loadAffiliateDomains(): AffiliateDomainsConfig {
 }
 
 // Threads renders the accessible timestamp as a full Japanese date/time string,
-// e.g. "2026年8月28日金曜日 18:29". This is far more reliable for the 3-day
+// e.g. "2026年8月28日金曜日 18:29". This is far more reliable for the lookback
 // cutoff than the relative "◯時間前" label, which Threads also renders and
 // which we deliberately ignore.
 function parseThreadsTimestamp(label: string): Date | null {
@@ -100,8 +100,9 @@ export async function openAuthenticatedPage(browser: Browser): Promise<Page> {
 }
 
 // Searches a keyword on Threads and returns candidate root posts (not replies)
-// that meet the "posted within 3 days" and "100+ likes" conditions. Does NOT
-// check the reply section yet — that requires opening each post individually.
+// that meet the "posted within LOOKBACK_DAYS days" and "100+ likes" conditions.
+// Does NOT check the reply section yet — that requires opening each post
+// individually.
 //
 // Everything inside the page.evaluate() callback below runs in the browser,
 // not in this Node process, so any helper it needs (findPostContainer etc.)
@@ -126,42 +127,6 @@ export async function searchKeywordCandidates(page: Page, keyword: string): Prom
   if (DEBUG_SCREENSHOTS) {
     mkdirSync(DEBUG_DIR, { recursive: true });
     await page.screenshot({ path: `${DEBUG_DIR}/search-${keyword}.png`, fullPage: true });
-
-    // Diagnostic: this search defaults to Threads' "top results" tab, which
-    // mixes in old-but-popular posts (see search-<keyword>.png). Check
-    // whether a "recent" tab exists and what URL it actually uses, since the
-    // 3-day-old + 100-likes condition is much more likely to be satisfied by
-    // sorting on recency first rather than filtering top-results by date.
-    try {
-      const recentTab = page.getByRole("tab", { name: "最近" }).or(page.getByText("最近", { exact: true }));
-      if (await recentTab.first().isVisible({ timeout: 3000 })) {
-        await recentTab.first().click();
-        await page.waitForTimeout(2000);
-        console.log(`  [debug] "最近" tab URL for "${keyword}": ${page.url()}`);
-        // Scroll much further than the normal MAX_SCROLLS to see how deep
-        // (how far back in time) this feed can practically reach — needed to
-        // judge whether reaching a 3-day-old post here is feasible at all.
-        for (let i = 0; i < 20; i++) {
-          await page.mouse.wheel(0, 2500);
-          await page.waitForTimeout(1000);
-        }
-        const oldestLabel = await page
-          .evaluate(() => {
-            const anchors = Array.from(document.querySelectorAll('a[href*="/post/"]')) as HTMLElement[];
-            const last = anchors[anchors.length - 1];
-            return last ? last.getAttribute("aria-label") || last.innerText || null : null;
-          })
-          .catch(() => null);
-        console.log(`  [debug] "最近" tab for "${keyword}" after deep scroll, oldest visible post label: ${oldestLabel}`);
-        await page.screenshot({ path: `${DEBUG_DIR}/search-${keyword}-recent-deep.png`, fullPage: true });
-      } else {
-        console.log(`  [debug] No "最近" tab visible for "${keyword}".`);
-      }
-    } catch (error) {
-      console.log(
-        `  [debug] Could not check "最近" tab for "${keyword}": ${error instanceof Error ? error.message : error}`
-      );
-    }
   }
 
   const cutoff = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);

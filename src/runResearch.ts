@@ -31,7 +31,7 @@ async function main(): Promise<void> {
     for (const keyword of keywords) {
       console.log(`Searching keyword "${keyword}"...`);
       const candidates = await searchKeywordCandidates(page, keyword);
-      console.log(`  -> ${candidates.length} candidate(s) meet the 3-day / 100+ likes conditions.`);
+      console.log(`  -> ${candidates.length} candidate(s) meet the 7-day / 100+ likes conditions.`);
 
       let matchedForKeyword = 0;
       for (const candidate of candidates) {
@@ -47,7 +47,7 @@ async function main(): Promise<void> {
 
       if (matchedForKeyword === 0) {
         console.log(
-          `  条件(3日以内・いいね100以上・返信欄にアフィリエイトリンクあり)をすべて満たす投稿が見つかりませんでした: "${keyword}"`
+          `  条件(7日以内・いいね100以上・返信欄にアフィリエイトリンクあり)をすべて満たす投稿が見つかりませんでした: "${keyword}"`
         );
       }
     }
@@ -60,7 +60,7 @@ async function main(): Promise<void> {
   if (qualified.length === 0) {
     console.log("");
     console.log(
-      "すべてのキーワードで、4条件(指定キーワード・3日以内・いいね100以上・返信欄にアフィリエイトリンクあり)を" +
+      "すべてのキーワードで、4条件(指定キーワード・7日以内・いいね100以上・返信欄にアフィリエイトリンクあり)を" +
         "すべて満たす投稿が見つかりませんでした。条件は緩めず、style-examples.json の自動収集分は今回0件のまま更新します。"
     );
   }
