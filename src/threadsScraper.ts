@@ -138,7 +138,22 @@ export async function searchKeywordCandidates(page: Page, keyword: string): Prom
         await recentTab.first().click();
         await page.waitForTimeout(2000);
         console.log(`  [debug] "最近" tab URL for "${keyword}": ${page.url()}`);
-        await page.screenshot({ path: `${DEBUG_DIR}/search-${keyword}-recent.png`, fullPage: true });
+        // Scroll much further than the normal MAX_SCROLLS to see how deep
+        // (how far back in time) this feed can practically reach — needed to
+        // judge whether reaching a 3-day-old post here is feasible at all.
+        for (let i = 0; i < 20; i++) {
+          await page.mouse.wheel(0, 2500);
+          await page.waitForTimeout(1000);
+        }
+        const oldestLabel = await page
+          .evaluate(() => {
+            const anchors = Array.from(document.querySelectorAll('a[href*="/post/"]')) as HTMLElement[];
+            const last = anchors[anchors.length - 1];
+            return last ? last.getAttribute("aria-label") || last.innerText || null : null;
+          })
+          .catch(() => null);
+        console.log(`  [debug] "最近" tab for "${keyword}" after deep scroll, oldest visible post label: ${oldestLabel}`);
+        await page.screenshot({ path: `${DEBUG_DIR}/search-${keyword}-recent-deep.png`, fullPage: true });
       } else {
         console.log(`  [debug] No "最近" tab visible for "${keyword}".`);
       }
