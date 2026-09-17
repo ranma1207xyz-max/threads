@@ -1,0 +1,41 @@
+{
+  "fetchedAt": "2026-09-17T08:56:27.906Z",
+  "results": [
+    {
+      "keyword": "スキンケア",
+      "status": "error",
+      "error": "Threads keyword_search error (500) for \"スキンケア\": {}"
+    },
+    {
+      "keyword": "毛穴美容液おすすめ",
+      "status": "error",
+      "error": "Threads keyword_search error (500) for \"毛穴美容液おすすめ\": {\"error\":{\"code\":1,\"message\":\"An unknown error occurred\"}}"
+    },
+    {
+      "keyword": "毛穴美容液レビュー",
+      "status": "error",
+      "error": "Threads keyword_search error (500) for \"毛穴美容液レビュー\": {}"
+    },
+    {
+      "keyword": "乾燥肌化粧水おすすめ",
+      "status": "error",
+      "error": "Threads keyword_search error (500) for \"乾燥肌化粧水おすすめ\": {}"
+    },
+    {
+      "keyword": "乾燥肌美容液リピート",
+      "status": "error",
+      "error": "Threads keyword_search error (500) for \"乾燥肌美容液リピート\": {}"
+    },
+    {
+      "keyword": "エイジングケア美容液おすすめ",
+      "status": "error",
+      "error": "Threads keyword_search error (500) for \"エイジングケア美容液おすすめ\": {\"error\":{\"code\":1,\"message\":\"An unknown error occurred\"}}"
+    },
+    {
+      "keyword": "プチプラ美容液おすすめ",
+      "status": "error",
+      "error": "Threads keyword_search error (500) for \"プチプラ美容液おすすめ\": {\"error\":{\"code\":1,\"message\":\"An unknown error occurred\"}}"
+    }
+  ],
+  "posts": []
+}
