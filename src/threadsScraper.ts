@@ -1,5 +1,13 @@
-import { existsSync, readFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync } from "fs";
 import { chromium, type Browser, type Page } from "playwright";
+
+// Temporary diagnostic aid: when RESEARCH_DEBUG_SCREENSHOTS=1, save a full-page
+// screenshot of each keyword's search results to debug/ so a human can check
+// whether the DOM-selector-based scraping (findPostContainer, like-count
+// parsing, etc.) actually lines up with what a logged-in browser sees, versus
+// the 4 required conditions genuinely having no matching posts that day.
+const DEBUG_SCREENSHOTS = process.env.RESEARCH_DEBUG_SCREENSHOTS === "1";
+const DEBUG_DIR = "debug";
 
 const SESSION_STATE_PATH = "data/threads-session.json";
 const SEARCH_URL = "https://www.threads.com/search";
@@ -113,6 +121,11 @@ export async function searchKeywordCandidates(page: Page, keyword: string): Prom
   for (let i = 0; i < MAX_SCROLLS; i++) {
     await page.mouse.wheel(0, 2000);
     await page.waitForTimeout(1200);
+  }
+
+  if (DEBUG_SCREENSHOTS) {
+    mkdirSync(DEBUG_DIR, { recursive: true });
+    await page.screenshot({ path: `${DEBUG_DIR}/search-${keyword}.png`, fullPage: true });
   }
 
   const cutoff = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
