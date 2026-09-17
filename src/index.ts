@@ -82,7 +82,7 @@ async function main(): Promise<void> {
 
   if (dryRun) {
     console.log("Dry run: skipping actual post to Threads.");
-    console.log(`Would reply with affiliate link: ${product.url}`);
+    console.log(`Would reply with: #PR\n${product.url}`);
     return;
   }
 
@@ -109,8 +109,14 @@ async function main(): Promise<void> {
 
   // STEP 2: the post we just created above (threadsPostId) IS our own post
   // to reply to — no separate lookup is needed or performed.
-  // STEP 3: reply to that exact post with the affiliate link only.
-  const threadsReplyId = await postReplyToThreads(product.url, threadsPostId);
+  // STEP 3: reply to that exact post with the affiliate link. The ad
+  // disclosure required by the stealth-marketing regulation (景品表示法) now
+  // lives here instead of the main post body (2026-09-17 owner decision,
+  // made aware of the compliance risk that a reply-only disclosure may not
+  // satisfy "readily recognizable to a general consumer" — see
+  // 経営企画/事業計画.md).
+  const replyText = `#PR\n${product.url}`;
+  const threadsReplyId = await postReplyToThreads(replyText, threadsPostId);
   if (!threadsReplyId) {
     throw new Error(
       `Failed to obtain the reply ID after replying to threadsPostId=${threadsPostId}.`
