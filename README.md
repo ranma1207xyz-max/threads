@@ -45,8 +45,9 @@ Threads公式APIには、他人の投稿の「いいね数」や「返信欄の�
 - 初回セットアップ: ローカルで `npm run research:login` を実行すると、ブラウザが開くので手動でThreadsにログイン(2段階認証があれば完了させる)し、ターミナルでEnterを押すとログイン状態が `data/threads-session.json` に保存される(このファイルはログイン情報そのものに相当するため`.gitignore`済み・絶対にコミットしない)。
   - 保存した `data/threads-session.json` の中身をbase64化し、GitHub Secretsに `THREADS_SESSION_STATE_B64` として登録する(例: `powershell -c "[Convert]::ToBase64String([IO.File]::ReadAllBytes('data/threads-session.json'))"`)。
   - Threadsのログインセッションは無期限ではなく、いずれ切れる可能性がある。ワークフローが「セッション切れ」で失敗するようになったら、`npm run research:login` をやり直して `THREADS_SESSION_STATE_B64` を更新すること。
-- 自動収集した例には `source: "threads_browser_research"` に加え、`keyword`(検索キーワード)・`postedAt`(投稿日時)・`likes`(いいね数)・`replyCount`(返信数)・`matchedReplyText`(アフィリエイトリンクが見つかった返信の本文)・`affiliateLink`(確認できたリンクの実際の遷移先)を付与して保存する。オーナーが手動で追加した例(`source` フィールドなし)は上書きされず残る。
-- **注意**: `contentGenerator.ts` のプロンプトは、これらの例を「構成・トーン・テンポの参考」としてのみ使い、文章そのものはコピーせず新規に書き起こすよう指示している。取得した文章をそのまま転載しているわけではないが、著しく似た投稿にならないか気になる場合は生成結果を確認すること。
+- 自動収集した例には `source: "threads_browser_research"` に加え、`keyword`(検索キーワード)・`postedAt`(投稿日時)・`likes`(いいね数)・`replyCount`(返信数)・`matchedReplyText`(アフィリエイトリンクが見つかった返信の本文)・`affiliateLink`(確認できたリンクの実際の遷移先)・`imageUrl`(投稿に付いていた画像のURL、無ければ未設定)を付与して保存する。オーナーが手動で追加した例(`source` フィールドなし)は上書きされず残る。
+- **注意(文章)**: `contentGenerator.ts` のプロンプトは、これらの例を「構成・トーン・テンポの参考」としてのみ使い、文章そのものはコピーせず新規に書き起こすよう指示している。取得した文章をそのまま転載しているわけではないが、著しく似た投稿にならないか気になる場合は生成結果を確認すること。
+- **注意(画像・著作権リスク、取締役会承認済み)**: `imageUrl` が入った例がある場合、`index.ts` の投稿時にその中からランダムに1枚選び、**他人の投稿の画像をそのままURLで参照(ホットリンク)して自社の投稿に使用する**(2026-09-17 オーナー承認。文章とは異なりAI生成による代替ではなく、他人が撮影・作成した画像をそのまま利用する方式であり、著作権侵害のリスクがあることを理解した上での意思決定。詳細は `経営企画/事業計画.md` 参照)。該当する例が無い場合、または画像URLがすでに失効している場合は `products.json` の `imageUrl` にフォールバックする。
 - `data/affiliate-domains.json` に登録されている提携先(ASP)ドメインは随時見直す(新しいASPと提携したら追加する)。
 
 ## 商材候補リサーチ(手動実行)

@@ -25,6 +25,7 @@ export interface StyleExample {
   replyCount?: number;
   matchedReplyText?: string;
   affiliateLink?: string;
+  imageUrl?: string;
 }
 
 const SYSTEM_PROMPT = `あなたはThreads(Meta)向けの日本語アフィリエイト投稿を書くコピーライターです。扱うジャンルは美容系、その中でも美容液・肌関連(スキンケア)商材(化粧水・美容液・クリーム・毛穴ケア等)です。

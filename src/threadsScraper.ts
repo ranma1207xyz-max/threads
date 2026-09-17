@@ -28,6 +28,7 @@ export interface CandidatePost {
   postedAt: Date;
   likes: number;
   keyword: string;
+  imageUrl?: string;
 }
 
 export interface QualifiedPost extends CandidatePost {
@@ -43,6 +44,7 @@ interface RawPost {
   text: string;
   timestampLabel: string;
   likesLabel: string;
+  imageUrl?: string;
 }
 
 function loadAffiliateDomains(): AffiliateDomainsConfig {
@@ -212,7 +214,14 @@ export async function searchKeywordCandidates(page: Page, keyword: string): Prom
         .filter((t) => t.length > 3 && !skipTexts.has(t) && !/^[\d,.]+万?$/.test(t));
       const text = Array.from(new Set(textNodes)).join("\n");
 
-      results.push({ permalink: href, username, text, timestampLabel, likesLabel });
+      // The post's own photo(s) render with an alt text starting with
+      // "Photo by ..." — distinct from the profile picture (alt ends in
+      // "のプロフィール写真") and follow-button icons (no alt at all). Only
+      // the first photo is used when a post has more than one.
+      const photoImg = container.querySelector('img[alt^="Photo by "]') as HTMLImageElement | null;
+      const imageUrl = photoImg?.src || undefined;
+
+      results.push({ permalink: href, username, text, timestampLabel, likesLabel, imageUrl });
     }
     return results;
   }, TIMESTAMP_LABEL_SOURCE);
@@ -233,6 +242,7 @@ export async function searchKeywordCandidates(page: Page, keyword: string): Prom
       postedAt,
       likes,
       keyword,
+      imageUrl: raw.imageUrl,
     });
   }
   return candidates;

@@ -17,6 +17,18 @@ function readJson<T>(path: string): T {
   return JSON.parse(readFileSync(path, "utf-8")) as T;
 }
 
+// Picks a random image from among this run's style examples that have one
+// (i.e. the trending posts they were scraped from had a photo attached).
+// These are other users' own photos, hotlinked directly with the owner's
+// informed sign-off on the copyright risk (see 経営企画/事業計画.md) rather
+// than an AI-generated substitute — kept as a separate, swappable step in
+// case that decision changes later.
+function pickTrendImageUrl(styleExamples: StyleExample[]): string | undefined {
+  const withImages = styleExamples.filter((example) => example.imageUrl);
+  if (withImages.length === 0) return undefined;
+  return withImages[Math.floor(Math.random() * withImages.length)].imageUrl;
+}
+
 function pickNextProduct(products: Product[], log: PostedLogEntry[]): Product {
   const lastPostedAt = new Map<string, string>();
   for (const entry of log) {
@@ -55,9 +67,18 @@ async function main(): Promise<void> {
 
   const text = await generatePostText(product, styleExamples);
 
+  // Prefer a photo from one of this run's trending-post examples (adds
+  // variety and matches what's currently resonating) over the product's own
+  // fixed banner image; fall back to the product image if there is no
+  // trending photo, or if the trending photo's URL has since expired (these
+  // are hotlinked from Threads' own CDN, whose URLs are time-limited).
+  const trendImageUrl = pickTrendImageUrl(styleExamples);
+  const imageUrl = trendImageUrl ?? product.imageUrl;
+
   console.log("=== Generated post (hook, no affiliate link) ===");
   console.log(text);
   console.log("=================================================");
+  console.log(`Image: ${imageUrl ?? "(none)"}${trendImageUrl ? " (from a trending-post example)" : ""}`);
 
   if (dryRun) {
     console.log("Dry run: skipping actual post to Threads.");
@@ -66,7 +87,21 @@ async function main(): Promise<void> {
   }
 
   // STEP 1: post the hook as a new top-level post.
-  const threadsPostId = await postToThreads(text, product.imageUrl);
+  let threadsPostId: string;
+  try {
+    threadsPostId = await postToThreads(text, imageUrl);
+  } catch (error) {
+    if (trendImageUrl && imageUrl !== product.imageUrl) {
+      console.warn(
+        `Posting with the trending-post image failed (likely an expired URL), retrying with the product image instead: ${
+          error instanceof Error ? error.message : error
+        }`
+      );
+      threadsPostId = await postToThreads(text, product.imageUrl);
+    } else {
+      throw error;
+    }
+  }
   if (!threadsPostId) {
     throw new Error("Failed to obtain the post ID of the new Threads post. Skipping the reply.");
   }

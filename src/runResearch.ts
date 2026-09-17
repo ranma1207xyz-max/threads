@@ -86,6 +86,7 @@ async function main(): Promise<void> {
     replyCount: post.replyCount,
     matchedReplyText: post.matchedReplyText,
     affiliateLink: post.affiliateLinkResolved,
+    imageUrl: post.imageUrl,
   }));
 
   const merged = [...manualExamples, ...autoExamples];
