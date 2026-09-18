@@ -82,8 +82,11 @@ async function main(): Promise<void> {
   // lives in this reply rather than the new post's body (2026-09-17 owner
   // decision, made aware of the compliance risk that a reply-only disclosure
   // may not satisfy "readily recognizable to a general consumer" — see
-  // 経営企画/事業計画.md).
-  const replyText = `${body}\n\n#PR\n${product.url}`;
+  // 経営企画/事業計画.md). Deliberately "[PR]", not "#PR": a leading "#"
+  // gets promoted by Threads into a topic-tag badge next to the poster's
+  // name (and is itself stripped from the inline text), which is exactly
+  // the visual the owner asked to get rid of (2026-09-18).
+  const replyText = `${body}\n\n[PR]\n${product.url}`;
 
   console.log("=== Generated hook (new post) ===");
   console.log(hook);
