@@ -82,11 +82,15 @@ async function main(): Promise<void> {
   // lives in this reply rather than the new post's body (2026-09-17 owner
   // decision, made aware of the compliance risk that a reply-only disclosure
   // may not satisfy "readily recognizable to a general consumer" — see
-  // 経営企画/事業計画.md). Deliberately "[PR]", not "#PR": a leading "#"
-  // gets promoted by Threads into a topic-tag badge next to the poster's
-  // name (and is itself stripped from the inline text), which is exactly
-  // the visual the owner asked to get rid of (2026-09-18).
-  const replyText = `${body}\n\n[PR]\n${product.url}`;
+  // 経営企画/事業計画.md). Plain lowercase "pr" trailing the link on the same
+  // line, no "#" and no brackets: matches the convention observed on a real,
+  // high-performing account in the same niche (2026-09-18 owner decision).
+  // A leading "#" specifically must be avoided — Threads promotes it into a
+  // topic-tag badge next to the poster's name, which is what motivated this
+  // whole change in the first place. Full removal of any disclosure was
+  // considered and rejected — that would be a clear-cut stealth-marketing
+  // violation, not just a borderline one, so this is the floor.
+  const replyText = `${body}\n\n${product.url} pr`;
 
   console.log("=== Generated hook (new post) ===");
   console.log(hook);
