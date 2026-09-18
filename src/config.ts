@@ -12,5 +12,4 @@ export const config = {
   threadsAccessToken: requireEnv("THREADS_ACCESS_TOKEN"),
   threadsUserId: requireEnv("THREADS_USER_ID"),
   anthropicApiKey: requireEnv("ANTHROPIC_API_KEY"),
-  maxPostLength: 500,
 };

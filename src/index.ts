@@ -65,7 +65,10 @@ async function main(): Promise<void> {
     throw new Error(`Product ${product.id} has no url (affiliate link). Aborting before posting.`);
   }
 
-  const text = await generatePostText(product, styleExamples);
+  // The new post carries only the short hook; the persuasive body text goes
+  // into the self-reply alongside the affiliate link (2026-09-18 owner
+  // decision), instead of the whole thing living in the new post as before.
+  const { hook, body } = await generatePostText(product, styleExamples);
 
   // Prefer a photo from one of this run's trending-post examples (adds
   // variety and matches what's currently resonating) over the product's own
@@ -75,21 +78,29 @@ async function main(): Promise<void> {
   const trendImageUrl = pickTrendImageUrl(styleExamples);
   const imageUrl = trendImageUrl ?? product.imageUrl;
 
-  console.log("=== Generated post (hook, no affiliate link) ===");
-  console.log(text);
+  // The ad disclosure required by the stealth-marketing regulation (景品表示法)
+  // lives in this reply rather than the new post's body (2026-09-17 owner
+  // decision, made aware of the compliance risk that a reply-only disclosure
+  // may not satisfy "readily recognizable to a general consumer" — see
+  // 経営企画/事業計画.md).
+  const replyText = `${body}\n\n#PR\n${product.url}`;
+
+  console.log("=== Generated hook (new post) ===");
+  console.log(hook);
+  console.log("=== Generated reply (body + affiliate link) ===");
+  console.log(replyText);
   console.log("=================================================");
   console.log(`Image: ${imageUrl ?? "(none)"}${trendImageUrl ? " (from a trending-post example)" : ""}`);
 
   if (dryRun) {
     console.log("Dry run: skipping actual post to Threads.");
-    console.log(`Would reply with: #PR\n${product.url}`);
     return;
   }
 
   // STEP 1: post the hook as a new top-level post.
   let threadsPostId: string;
   try {
-    threadsPostId = await postToThreads(text, imageUrl);
+    threadsPostId = await postToThreads(hook, imageUrl);
   } catch (error) {
     if (trendImageUrl && imageUrl !== product.imageUrl) {
       console.warn(
@@ -97,7 +108,7 @@ async function main(): Promise<void> {
           error instanceof Error ? error.message : error
         }`
       );
-      threadsPostId = await postToThreads(text, product.imageUrl);
+      threadsPostId = await postToThreads(hook, product.imageUrl);
     } else {
       throw error;
     }
@@ -109,13 +120,8 @@ async function main(): Promise<void> {
 
   // STEP 2: the post we just created above (threadsPostId) IS our own post
   // to reply to — no separate lookup is needed or performed.
-  // STEP 3: reply to that exact post with the affiliate link. The ad
-  // disclosure required by the stealth-marketing regulation (景品表示法) now
-  // lives here instead of the main post body (2026-09-17 owner decision,
-  // made aware of the compliance risk that a reply-only disclosure may not
-  // satisfy "readily recognizable to a general consumer" — see
-  // 経営企画/事業計画.md).
-  const replyText = `#PR\n${product.url}`;
+  // STEP 3: reply to that exact post with the body text, ad disclosure, and
+  // affiliate link together.
   const threadsReplyId = await postReplyToThreads(replyText, threadsPostId);
   if (!threadsReplyId) {
     throw new Error(
