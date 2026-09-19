@@ -85,10 +85,30 @@ const SYSTEM_PROMPT = `あなたはThreads(Meta)向けの日本語アフィリ�
 [BODY]
 (本文のみ)`;
 
-function buildUserPrompt(product: Product, styleExamples: StyleExample[]): string {
+// The post "shape" is fixed per time slot (2026-09-19 owner decision) so the
+// four evening posts don't read as one template repeated. See index.ts for
+// the hour -> style mapping. "question" posts carry no product, so they are
+// generated separately (generateQuestionPost) rather than through this type.
+export type PostStyle = "morning" | "cheatsheet" | "decisive" | "steps";
+
+const STYLE_INSTRUCTIONS: Record<PostStyle, string> = {
+  morning:
+    "「悩み共感+使い方」型で書くこと。フックは朝の鏡・あるあるなどの共感から入り、150文字以内の短さにする。早見表型・言い切り型は使わない。",
+  cheatsheet:
+    "「早見表」型(「しつこいけど一生言い続ける」系の宣言調の書き出しも可)で書くこと。言い切り型は使わない。",
+  decisive:
+    "「◯◯は買いません。理由は△△だからです。」の言い切りリズム型で書くこと。早見表型は使わない。他社・他商品をけなさず、理由は事実として言えることだけにする。",
+  steps:
+    "「使い方の手順」型で書くこと。フックは「順番を変えただけで〜」のような1〜3行の短い導入(150文字以内)にとどめ、本文は①②③の手順を中心にする。早見表型・言い切り型は使わない。",
+};
+
+function buildUserPrompt(product: Product, styleExamples: StyleExample[], style?: PostStyle): string {
   const examplesBlock = styleExamples
     .map((example, index) => `例${index + 1}:\n${example.text}`)
     .join("\n\n");
+  const styleBlock = style
+    ? `\n# 今回の型(必ずこの型で書き、他の型は混ぜない)\n${STYLE_INSTRUCTIONS[style]}\n`
+    : "";
 
   return `# 参考にする「型」の例(コピーではなく構成・トーンの参考のみ)
 ${examplesBlock}
@@ -98,8 +118,45 @@ ${examplesBlock}
 リンク: ${product.url}
 推しポイント:
 ${product.points.map((point) => `- ${point}`).join("\n")}
-
+${styleBlock}
 上記の型を参考に、この商品のフックと本文を1組作成してください。`;
+}
+
+const QUESTION_SYSTEM_PROMPT = `あなたはThreads(Meta)向けの日本語投稿を書くライターです。ジャンルは美容・スキンケアです。
+今回書くのは、フォロワーが気軽にコメントできる「質問だけの投稿」です。商品の宣伝ではありません。
+
+決まり:
+- 商品名・ブランド名・URL・「PR」などの広告表示は一切入れないこと。
+- 全体で100文字前後(最大150文字)。一文一行で、意味の区切りごとに改行する。
+- 最後は、一言で答えられる質問で終えること(例:「みんなはどっち?」「教えてください」)。
+- 効能効果を断定しない。医師や専門家を名乗らない。実績・肩書き・体験を作らない。
+- 前置きや説明、マークダウンの装飾なしで、投稿の本文のみを出力すること。`;
+
+const QUESTION_THEMES = [
+  "自分の肌タイプ(乾燥・脂性・混合・敏感)",
+  "スキンケアは朝と夜、どちらに力を入れているか",
+  "スキンケアの工程は何ステップか",
+  "美容液を使う派か、使わない派か",
+  "いちばん気になる肌悩み(くすみ・毛穴・乾燥・ゆらぎ)",
+  "日焼け止めは毎日塗る派か、そうでない派か",
+  "化粧水はハンドプレス派か、コットン派か",
+];
+
+export async function generateQuestionPost(): Promise<string> {
+  const theme = QUESTION_THEMES[Math.floor(Math.random() * QUESTION_THEMES.length)];
+  const response = await client.messages.create({
+    model: "claude-opus-5",
+    max_tokens: 512,
+    system: QUESTION_SYSTEM_PROMPT,
+    output_config: { effort: "low" },
+    messages: [{ role: "user", content: `今回のテーマ: ${theme}\n\nこのテーマで、質問だけの投稿を1つ書いてください。` }],
+  });
+
+  const textBlock = response.content.find((block) => block.type === "text");
+  if (!textBlock || textBlock.type !== "text") {
+    throw new Error("Claude did not return text content");
+  }
+  return textBlock.text.trim().slice(0, 150);
 }
 
 function parseGeneratedPost(raw: string): GeneratedPost {
@@ -116,14 +173,15 @@ function parseGeneratedPost(raw: string): GeneratedPost {
 
 export async function generatePostText(
   product: Product,
-  styleExamples: StyleExample[]
+  styleExamples: StyleExample[],
+  style?: PostStyle
 ): Promise<GeneratedPost> {
   const response = await client.messages.create({
     model: "claude-opus-5",
     max_tokens: 1024,
     system: SYSTEM_PROMPT,
     output_config: { effort: "low" },
-    messages: [{ role: "user", content: buildUserPrompt(product, styleExamples) }],
+    messages: [{ role: "user", content: buildUserPrompt(product, styleExamples, style) }],
   });
 
   const textBlock = response.content.find((block) => block.type === "text");

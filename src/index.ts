@@ -1,5 +1,11 @@
 import { readFileSync, writeFileSync } from "fs";
-import { generatePostText, type Product, type StyleExample } from "./contentGenerator.js";
+import {
+  generatePostText,
+  generateQuestionPost,
+  type PostStyle,
+  type Product,
+  type StyleExample,
+} from "./contentGenerator.js";
 import { postToThreads, postReplyToThreads } from "./threadsClient.js";
 
 const PRODUCTS_PATH = "data/products.json";
@@ -10,7 +16,36 @@ interface PostedLogEntry {
   productId: string;
   postedAt: string;
   threadsPostId: string;
-  threadsReplyId: string;
+  // Absent for question-only posts, which have no reply.
+  threadsReplyId?: string;
+}
+
+type Slot = PostStyle | "question";
+
+const SLOT_BY_JST_HOUR: Record<number, Slot> = {
+  8: "morning",
+  18: "cheatsheet",
+  19: "decisive",
+  20: "question",
+  21: "steps",
+};
+const KNOWN_SLOTS = new Set<string>(["morning", "cheatsheet", "decisive", "question", "steps"]);
+
+// Which post shape to use, decided by the Japan-time hour the run happens in
+// (2026-09-19 owner decision: split the evening posts by type so they don't
+// all read alike). Runs are often delayed 10-15 minutes by GitHub Actions,
+// so the hour is a reliable key. `--slot=<name>` overrides it for dry runs;
+// any other hour (e.g. a manual run) gets no forced type.
+function pickSlot(): Slot | undefined {
+  const override = process.argv.find((arg) => arg.startsWith("--slot="))?.slice("--slot=".length);
+  if (override) {
+    if (!KNOWN_SLOTS.has(override)) throw new Error(`Unknown --slot value: ${override}`);
+    return override as Slot;
+  }
+  const hour = Number(
+    new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", hour: "numeric", hourCycle: "h23" }).format(new Date())
+  );
+  return SLOT_BY_JST_HOUR[hour];
 }
 
 function readJson<T>(path: string): T {
@@ -44,6 +79,29 @@ function pickNextProduct(products: Product[], log: PostedLogEntry[]): Product {
   return sorted[0];
 }
 
+// A question-only post: no product, no link, no reply, no ad disclosure
+// (nothing is being advertised). Meant to invite comments from followers.
+async function runQuestionPost(dryRun: boolean, log: PostedLogEntry[]): Promise<void> {
+  const text = await generateQuestionPost();
+  console.log("=== Generated question post (no product, no link) ===");
+  console.log(text);
+  console.log("=================================================");
+
+  if (dryRun) {
+    console.log("Dry run: skipping actual post to Threads.");
+    return;
+  }
+
+  const threadsPostId = await postToThreads(text);
+  if (!threadsPostId) {
+    throw new Error("Failed to obtain the post ID of the question post.");
+  }
+  console.log(`Posted question. threadsPostId=${threadsPostId}`);
+
+  log.push({ productId: "engagement-question", postedAt: new Date().toISOString(), threadsPostId });
+  writeFileSync(POSTED_LOG_PATH, JSON.stringify(log, null, 2) + "\n");
+}
+
 async function main(): Promise<void> {
   const dryRun = process.argv.includes("--dry-run");
 
@@ -53,6 +111,13 @@ async function main(): Promise<void> {
 
   if (products.length === 0) {
     throw new Error("data/products.json is empty. Add at least one product.");
+  }
+
+  const slot = pickSlot();
+  console.log(`Post slot: ${slot ?? "(none - no forced style)"}`);
+  if (slot === "question") {
+    await runQuestionPost(dryRun, log);
+    return;
   }
 
   const product = pickNextProduct(products, log);
@@ -68,7 +133,7 @@ async function main(): Promise<void> {
   // The new post carries only the short hook; the persuasive body text goes
   // into the self-reply alongside the affiliate link (2026-09-18 owner
   // decision), instead of the whole thing living in the new post as before.
-  const { hook, body } = await generatePostText(product, styleExamples);
+  const { hook, body } = await generatePostText(product, styleExamples, slot);
 
   // Prefer a photo from one of this run's trending-post examples (adds
   // variety and matches what's currently resonating) over the product's own
