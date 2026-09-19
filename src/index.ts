@@ -11,6 +11,7 @@ import { postToThreads, postReplyToThreads } from "./threadsClient.js";
 const PRODUCTS_PATH = "data/products.json";
 const STYLE_EXAMPLES_PATH = "data/style-examples.json";
 const POSTED_LOG_PATH = "data/posted-log.json";
+const RESEARCH_SETTINGS_PATH = "data/research-settings.json";
 
 interface PostedLogEntry {
   productId: string;
@@ -106,7 +107,12 @@ async function main(): Promise<void> {
   const dryRun = process.argv.includes("--dry-run");
 
   const products = readJson<Product[]>(PRODUCTS_PATH);
-  const styleExamples = readJson<StyleExample[]>(STYLE_EXAMPLES_PATH);
+  // Other-genre "structure only" examples can be switched off instantly here,
+  // without waiting for the next research run (see data/research-settings.json).
+  const researchSettings = readJson<{ includeOtherGenreStyles: boolean }>(RESEARCH_SETTINGS_PATH);
+  const styleExamples = readJson<StyleExample[]>(STYLE_EXAMPLES_PATH).filter(
+    (example) => example.genre !== "other" || researchSettings.includeOtherGenreStyles
+  );
   const log = readJson<PostedLogEntry[]>(POSTED_LOG_PATH);
 
   if (products.length === 0) {

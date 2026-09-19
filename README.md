@@ -157,3 +157,7 @@ threads-auto-post/
     post.yml       # 投稿のスケジュール実行
     insights.yml   # 閲覧数などの自動記録のスケジュール実行
 ```
+
+## 他ジャンルの「型だけ」参考(2026-09-19)
+
+「おすすめ」フィードに流れる美容以外の伸びている投稿(最大4件)を、書き出し・改行のリズム・引きの作り方だけの参考として投稿生成に渡す(`data/style-examples.json` の `genre: "other"`)。話題・内容・画像は使わない。伸びが悪くなったら最初に戻す対象: `data/research-settings.json` の `includeOtherGenreStyles` を `false` にすると、次の投稿からすぐ無効になる(翌朝の調査を待たなくてよい)。

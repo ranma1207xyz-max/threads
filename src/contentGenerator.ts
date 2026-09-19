@@ -26,6 +26,9 @@ export interface StyleExample {
   matchedReplyText?: string;
   affiliateLink?: string;
   imageUrl?: string;
+  // "other" = a viral post from a non-beauty genre, kept only as a reference
+  // for structure and phrasing (never its topic).
+  genre?: "other";
 }
 
 export interface GeneratedPost {
@@ -103,15 +106,23 @@ const STYLE_INSTRUCTIONS: Record<PostStyle, string> = {
 };
 
 function buildUserPrompt(product: Product, styleExamples: StyleExample[], style?: PostStyle): string {
-  const examplesBlock = styleExamples
+  const beautyExamples = styleExamples.filter((example) => example.genre !== "other");
+  const otherGenreExamples = styleExamples.filter((example) => example.genre === "other");
+  const examplesBlock = beautyExamples
     .map((example, index) => `例${index + 1}:\n${example.text}`)
     .join("\n\n");
+  const otherGenreBlock =
+    otherGenreExamples.length > 0
+      ? `\n\n# 型だけの参考(美容以外のジャンルで伸びている投稿。話題・内容・固有名詞は一切使わず、書き出しの言い回し・改行のリズム・引きの作り方だけ参考にする)\n${otherGenreExamples
+          .map((example, index) => `参考${index + 1}:\n${example.text}`)
+          .join("\n\n")}`
+      : "";
   const styleBlock = style
     ? `\n# 今回の型(必ずこの型で書き、他の型は混ぜない)\n${STYLE_INSTRUCTIONS[style]}\n`
     : "";
 
   return `# 参考にする「型」の例(コピーではなく構成・トーンの参考のみ)
-${examplesBlock}
+${examplesBlock}${otherGenreBlock}
 
 # 今回投稿する商品情報
 商品名: ${product.name}

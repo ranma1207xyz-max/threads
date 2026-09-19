@@ -13,6 +13,27 @@ import {
 
 const KEYWORDS_PATH = "data/research-keywords.json";
 const STYLE_EXAMPLES_PATH = "data/style-examples.json";
+const SETTINGS_PATH = "data/research-settings.json";
+
+// 2026-09-19 owner decision: viral posts from other genres that surface in the
+// feed are collected too, but only as references for *structure* (opening
+// lines, line breaks, cliffhangers) — never their topic or images. If the
+// posts' performance drops, turning this off is the first thing to revert:
+// set includeOtherGenreStyles to false in data/research-settings.json.
+interface ResearchSettings {
+  includeOtherGenreStyles: boolean;
+  maxOtherGenreExamples: number;
+}
+// Topics we do not want anywhere near our prompt, even as "structure only".
+const OTHER_GENRE_BLOCKLIST = [
+  "移民", "外国人", "政治", "選挙", "自民", "立憲", "首相", "総理", "差別", "戦争", "殺", "死ね",
+  "事故", "逮捕", "宗教", "ハゲ", "翻訳", "ネタバレ",
+];
+function isUsableOtherGenrePost(text: string): boolean {
+  const length = text.trim().length;
+  if (length < 30 || length > 600) return false;
+  return !OTHER_GENRE_BLOCKLIST.some((word) => text.includes(word));
+}
 
 // 2026-09-19 owner decision: the recommended ("おすすめ") feed is the main
 // research source, since it shows what Threads itself pushes to this
@@ -37,7 +58,9 @@ async function main(): Promise<void> {
   const browser = await launchBrowser();
   const page = await openAuthenticatedPage(browser);
 
+  const settings = readJson<ResearchSettings>(SETTINGS_PATH);
   const qualified: QualifiedPost[] = [];
+  const otherGenre: QualifiedPost[] = [];
   const seenPermalinks = new Set<string>();
 
   const adopt = async (candidate: CandidatePost): Promise<boolean> => {
@@ -55,7 +78,18 @@ async function main(): Promise<void> {
 
   try {
     console.log("Reading the recommended (おすすめ) feed...");
-    const feedCandidates = (await searchFeedCandidates(page, FEED_SCROLLS)).filter((c) => isBeautyRelated(c.text));
+    const allFeedCandidates = await searchFeedCandidates(page, FEED_SCROLLS);
+    const feedCandidates = allFeedCandidates.filter((c) => isBeautyRelated(c.text));
+    if (settings.includeOtherGenreStyles) {
+      const others = allFeedCandidates
+        .filter((c) => !isBeautyRelated(c.text) && c.username !== OWN_USERNAME && isUsableOtherGenrePost(c.text))
+        .sort((a, b) => b.likes - a.likes)
+        .slice(0, settings.maxOtherGenreExamples);
+      // Structure-only references: no reply inspection, and the photo is dropped
+      // so an unrelated image can never end up on one of our posts.
+      for (const candidate of others) otherGenre.push({ ...candidate, imageUrl: undefined, replyCount: 0 });
+      console.log(`  -> ${otherGenre.length} other-genre post(s) kept as structure-only references.`);
+    }
     console.log(`  -> ${feedCandidates.length} beauty-related post(s) in the feed meet the 7-day / 100+ likes conditions.`);
     feedCandidates.sort((a, b) => b.likes - a.likes);
     let feedAdopted = 0;
@@ -105,7 +139,7 @@ async function main(): Promise<void> {
   );
 
   const fetchedAt = new Date().toISOString();
-  const autoExamples: StyleExample[] = qualified.map((post) => ({
+  const autoExamples: StyleExample[] = [...qualified, ...otherGenre].map((post) => ({
     text: post.text,
     source: "threads_browser_research",
     username: post.username,
@@ -118,6 +152,7 @@ async function main(): Promise<void> {
     matchedReplyText: post.matchedReplyText,
     affiliateLink: post.affiliateLinkResolved,
     imageUrl: post.imageUrl,
+    ...(otherGenre.includes(post) ? { genre: "other" as const } : {}),
   }));
 
   const merged = [...manualExamples, ...autoExamples];
