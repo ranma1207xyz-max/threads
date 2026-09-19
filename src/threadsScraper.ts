@@ -168,6 +168,63 @@ export async function searchKeywordCandidates(page: Page, keyword: string): Prom
     await page.screenshot({ path: `${DEBUG_DIR}/search-${keyword}.png`, fullPage: true });
   }
 
+  return extractCandidates(page, keyword);
+}
+
+// Threads' home "おすすめ" (For You) tab is a personalized feed driven by the
+// logged-in account's own interests, so unlike a keyword search it shows what
+// Threads itself is pushing to this account's beauty audience (2026-09-19
+// owner decision: prioritize what surfaces in the recommended feed over
+// keyword hits). Scrolls the feed and returns the same kind of candidates as
+// searchKeywordCandidates, tagged with the pseudo-keyword "おすすめ".
+export async function searchFeedCandidates(
+  page: Page,
+  scrolls: number,
+  feedUrl = "https://www.threads.com/",
+  label = "おすすめ"
+): Promise<CandidatePost[]> {
+  await page.goto(feedUrl, { waitUntil: "domcontentloaded" });
+  try {
+    await page.waitForSelector('a[href*="/post/"]', { timeout: 15000 });
+  } catch {
+    console.warn("No posts loaded in the recommended feed.");
+    return [];
+  }
+
+  // The feed is a scrollable column, not the whole page: park the mouse over
+  // it so the wheel events land on the feed rather than the empty margin.
+  // Threads only keeps the posts near the viewport in the DOM, so candidates
+  // are collected after every scroll step rather than once at the end.
+  await page.mouse.move(640, 500);
+  const byPermalink = new Map<string, CandidatePost>();
+  for (let i = 0; i <= scrolls; i++) {
+    for (const candidate of await extractCandidates(page, label)) {
+      byPermalink.set(candidate.permalink, candidate);
+    }
+    await page.mouse.wheel(0, 1500);
+    await page.waitForTimeout(1500);
+  }
+
+  if (DEBUG_SCREENSHOTS) {
+    mkdirSync(DEBUG_DIR, { recursive: true });
+    await page.screenshot({ path: `${DEBUG_DIR}/feed.png`, fullPage: true });
+  }
+
+  return Array.from(byPermalink.values());
+}
+
+// The recommended feed is not limited to beauty (it also surfaces unrelated
+// viral posts), so keep only posts that plainly talk about beauty/skincare.
+const BEAUTY_TERMS = [
+  "美容", "スキンケア", "美肌", "肌", "毛穴", "ニキビ", "くすみ", "乾燥", "保湿", "化粧水", "美容液",
+  "セラム", "乳液", "クリーム", "日焼け止め", "洗顔", "成分", "ビタミンC", "レチノール", "ナイアシンアミド",
+  "セラミド", "トラネキサム酸", "コスメ", "化粧", "メイク", "パック",
+];
+export function isBeautyRelated(text: string): boolean {
+  return BEAUTY_TERMS.some((term) => text.includes(term));
+}
+
+async function extractCandidates(page: Page, keyword: string): Promise<CandidatePost[]> {
   const cutoff = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
 
   const rawPosts: RawPost[] = await page.evaluate((labelPattern) => {
