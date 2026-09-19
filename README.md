@@ -18,7 +18,7 @@ Threads(Meta)へのアフィリエイト投稿を自動化するプロジェク�
 
 投稿した各Threads投稿について、閲覧数(views)・いいね・返信・リポスト・引用・シェアの数を、Threads公式APIのInsightsエンドポイント(`GET /{投稿ID}/insights`)経由で取得し、`data/insights-log.json` に時系列のスナップショットとして追記していく。
 
-- 実行: `npm run insights`(GitHub Actionsでは `.github/workflows/insights.yml` が毎日21:30 JSTに自動実行する)。
+- 実行: `npm run insights`(GitHub Actionsでは `.github/workflows/insights.yml` が毎日22:30 JSTに自動実行する)。
 - 対象は直近30日以内に投稿したものに限定する(古い投稿まで毎回取り直すと際限なく重くなるため)。
 - 1回の実行につき、対象の投稿ごとに1件のスナップショット(取得時点の累計値)を追記する形式。上書きではなく追記なので、同じ投稿の数字が時間とともにどう伸びたかを後から追える。
 - 一部の投稿の取得に失敗しても(削除済み投稿など)処理全体は止めない。全件失敗した場合のみエラーにする。
@@ -107,8 +107,8 @@ npm run post           # 実際にThreadsへ投稿する
 ### 6. スケジュール実行
 
 - `.github/workflows/research.yml` が毎朝6:00 JSTに自動リサーチを実行し、`style-examples.json` を更新する。
-- `.github/workflows/post.yml` が1日5回(8:00 / 11:00 / 14:00 / 17:00 / 20:00 JST)自動実行する。
-- `.github/workflows/insights.yml` が毎日21:30 JSTに閲覧数などを自動記録する。
+- `.github/workflows/post.yml` が1日5回(8:00 / 18:00 / 19:00 / 20:00 / 21:00 JST)自動実行する。
+- `.github/workflows/insights.yml` が毎日22:30 JSTに閲覧数などを自動記録する。
 
 頻度はどれもcron式を編集して調整可能。GitHub Actionsの画面から手動実行(`workflow_dispatch`)もでき、投稿ワークフローでは `dry_run: true` を指定すると投稿せず生成だけ確認できる。
 
