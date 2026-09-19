@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { type StyleExample } from "./contentGenerator.js";
 import {
-  checkRepliesForAffiliateLink,
+  inspectReplies,
   launchBrowser,
   openAuthenticatedPage,
   searchKeywordCandidates,
@@ -36,19 +36,18 @@ async function main(): Promise<void> {
       let matchedForKeyword = 0;
       for (const candidate of candidates) {
         if (seenPermalinks.has(candidate.permalink)) continue;
-        const result = await checkRepliesForAffiliateLink(page, candidate);
-        if (result) {
-          seenPermalinks.add(candidate.permalink);
-          qualified.push(result);
-          matchedForKeyword++;
-          console.log(`  [採用] ${candidate.permalink} (いいね${candidate.likes})`);
-        }
+        const result = await inspectReplies(page, candidate);
+        seenPermalinks.add(candidate.permalink);
+        qualified.push(result);
+        matchedForKeyword++;
+        console.log(
+          `  [採用] ${candidate.permalink} (いいね${candidate.likes}` +
+            `${result.affiliateLinkResolved ? "・返信欄にアフィリエイトリンクあり" : ""})`
+        );
       }
 
       if (matchedForKeyword === 0) {
-        console.log(
-          `  条件(7日以内・いいね100以上・返信欄にアフィリエイトリンクあり)をすべて満たす投稿が見つかりませんでした: "${keyword}"`
-        );
+        console.log(`  条件(7日以内・いいね100以上)を満たす投稿が見つかりませんでした: "${keyword}"`);
       }
     }
   } finally {
@@ -60,7 +59,7 @@ async function main(): Promise<void> {
   if (qualified.length === 0) {
     console.log("");
     console.log(
-      "すべてのキーワードで、4条件(指定キーワード・7日以内・いいね100以上・返信欄にアフィリエイトリンクあり)を" +
+      "すべてのキーワードで、3条件(指定キーワード・7日以内・いいね100以上)を" +
         "すべて満たす投稿が見つかりませんでした。条件は緩めず、style-examples.json の自動収集分は今回0件のまま更新します。"
     );
   }
@@ -93,7 +92,7 @@ async function main(): Promise<void> {
   writeFileSync(STYLE_EXAMPLES_PATH, JSON.stringify(merged, null, 2) + "\n");
   console.log(
     `Wrote ${merged.length} style examples (${manualExamples.length} manual + ${autoExamples.length} auto, ` +
-      `all auto entries passed the 4 required conditions).`
+      `all auto entries passed the 3 required conditions).`
   );
 }
 

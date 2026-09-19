@@ -33,9 +33,11 @@ export interface CandidatePost {
 
 export interface QualifiedPost extends CandidatePost {
   replyCount: number;
-  matchedReplyText: string;
-  affiliateLinkRaw: string;
-  affiliateLinkResolved: string;
+  // Only present when a reply's link was confirmed as an affiliate link.
+  // Having one is no longer required for adoption (2026-09-19 owner decision).
+  matchedReplyText?: string;
+  affiliateLinkRaw?: string;
+  affiliateLinkResolved?: string;
 }
 
 interface RawPost {
@@ -278,11 +280,10 @@ async function resolveAffiliateLink(rawUrl: string, config: AffiliateDomainsConf
 const URL_PATTERN = /https?:\/\/[^\s　]+/g;
 
 // Opens a candidate post's detail page (logged in, so the full reply list is
-// visible) and checks whether any reply contains a confirmed affiliate link.
-export async function checkRepliesForAffiliateLink(
-  page: Page,
-  candidate: CandidatePost
-): Promise<QualifiedPost | null> {
+// visible), counts the replies, and records the first reply carrying a
+// confirmed affiliate link if there is one. A missing affiliate link no
+// longer disqualifies the post (2026-09-19 owner decision).
+export async function inspectReplies(page: Page, candidate: CandidatePost): Promise<QualifiedPost> {
   const affiliateDomains = loadAffiliateDomains();
   await page.goto(candidate.permalink, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(1500);
@@ -344,5 +345,5 @@ export async function checkRepliesForAffiliateLink(
       }
     }
   }
-  return null;
+  return { ...candidate, replyCount };
 }
