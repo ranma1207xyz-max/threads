@@ -23,14 +23,19 @@ interface PostedLogEntry {
 
 type Slot = PostStyle | "question";
 
+// 2026-09-21 owner decision: the first two posts of the day (8:00, 18:00) use
+// the cheat-sheet style, which performed best; the rest follow a style picked
+// from what the research found in the recommended feed. The earlier morning /
+// decisive / steps / question styles are kept in the code but not scheduled;
+// e.g. set 20 back to "question" to bring the question-only post back.
 const SLOT_BY_JST_HOUR: Record<number, Slot> = {
-  8: "morning",
+  8: "cheatsheet",
   18: "cheatsheet",
-  19: "decisive",
-  20: "question",
-  21: "steps",
+  19: "feed",
+  20: "feed",
+  21: "feed",
 };
-const KNOWN_SLOTS = new Set<string>(["morning", "cheatsheet", "decisive", "question", "steps"]);
+const KNOWN_SLOTS = new Set<string>(["morning", "cheatsheet", "decisive", "question", "steps", "feed"]);
 
 // Which post shape to use, decided by the Japan-time hour the run happens in
 // (2026-09-19 owner decision: split the evening posts by type so they don't

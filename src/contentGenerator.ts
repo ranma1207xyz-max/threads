@@ -72,6 +72,7 @@ const SYSTEM_PROMPT = `あなたはThreads(Meta)向けの日本語アフィリ�
 - 本文は${BODY_MAX_LENGTH}文字以内。フックの続きとして、商品の魅力・使用感を伝えること。可能なら使い方や特徴を番号・矢印で構造化すること。
 - フック・本文のどちらにもURLやリンクを一切含めないこと。商品リンクはシステム側が本文の後ろに別途自動で追加する。
 - フック・本文のどちらにも「PR」やそれに類する広告表示を入れないこと。広告であることの明示はシステム側が別途行う。
+- 日本語だけで書くこと。「today」のように英単語を文中に混ぜない(ブランド名・成分名などの固有名詞を除く)。
 - 誇大広告・断定しすぎる効果効能表現は避け、個人の感想として書くこと。
 - 参考例の書き手の肩書き・経歴(「元◯◯」「◯◯の裏側を見てきた」等)や、リピート回数・年間課金額などの実績、芸能人などの実在の人物名は、事実として確認できないので一切まねしないこと。
 
@@ -92,9 +93,11 @@ const SYSTEM_PROMPT = `あなたはThreads(Meta)向けの日本語アフィリ�
 // four evening posts don't read as one template repeated. See index.ts for
 // the hour -> style mapping. "question" posts carry no product, so they are
 // generated separately (generateQuestionPost) rather than through this type.
-export type PostStyle = "morning" | "cheatsheet" | "decisive" | "steps";
+export type PostStyle = "morning" | "cheatsheet" | "decisive" | "steps" | "feed";
 
 const STYLE_INSTRUCTIONS: Record<PostStyle, string> = {
+  feed:
+    "下に示す「今回お手本にする1件」(おすすめフィードで実際に伸びていた投稿)の構成に沿って書くこと。書き出しの言い回し、改行のリズム、言いかけの引き、締め方をそのまま参考にする。ただし、お手本の話題・固有名詞・数字は使わず、この商品の紹介に置き換える。早見表型・言い切り型・手順型は混ぜない。",
   morning:
     "「悩み共感+使い方」型で書くこと。フックは朝の鏡・あるあるなどの共感から入り、150文字以内の短さにする。早見表型・言い切り型は使わない。",
   cheatsheet:
@@ -117,8 +120,19 @@ function buildUserPrompt(product: Product, styleExamples: StyleExample[], style?
           .map((example, index) => `参考${index + 1}:\n${example.text}`)
           .join("\n\n")}`
       : "";
-  const styleBlock = style
-    ? `\n# 今回の型(必ずこの型で書き、他の型は混ぜない)\n${STYLE_INSTRUCTIONS[style]}\n`
+  // The "feed" style follows one randomly chosen example that the research
+  // collected from the recommended feed (2026-09-21 owner decision). With no
+  // such example available, it falls back to no forced style.
+  let feedExample: StyleExample | undefined;
+  if (style === "feed") {
+    const pool = styleExamples.filter((example) => example.source === "threads_browser_research");
+    feedExample = pool[Math.floor(Math.random() * pool.length)];
+  }
+  const effectiveStyle = style === "feed" && !feedExample ? undefined : style;
+  const styleBlock = effectiveStyle
+    ? `\n# 今回の型(必ずこの型で書き、他の型は混ぜない)\n${STYLE_INSTRUCTIONS[effectiveStyle]}${
+        feedExample ? `\n\n## 今回お手本にする1件\n${feedExample.text}` : ""
+      }\n`
     : "";
 
   return `# 参考にする「型」の例(コピーではなく構成・トーンの参考のみ)
@@ -176,9 +190,12 @@ function parseGeneratedPost(raw: string): GeneratedPost {
     throw new Error(`Claude's response did not follow the [HOOK]/[BODY] format: ${raw.slice(0, 200)}`);
   }
   const [, hook, body] = match;
+  // The model sometimes closes the sections with [/HOOK] / [/BODY]; those tags
+  // must never reach a published post.
+  const stripClosingTags = (text: string): string => text.replace(/\[\/(HOOK|BODY)\]/g, "").trim();
   return {
-    hook: hook.trim().slice(0, HOOK_MAX_LENGTH),
-    body: body.trim().slice(0, BODY_MAX_LENGTH),
+    hook: stripClosingTags(hook).slice(0, HOOK_MAX_LENGTH),
+    body: stripClosingTags(body).slice(0, BODY_MAX_LENGTH),
   };
 }
 

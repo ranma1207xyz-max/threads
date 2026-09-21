@@ -111,12 +111,10 @@ npm run post           # 実際にThreadsへ投稿する
 - `.github/workflows/research.yml` が毎朝6:00 JSTに自動リサーチを実行し、`style-examples.json` を更新する。
 - `.github/workflows/post.yml` が1日5回(8:00 / 18:00 / 19:00 / 20:00 / 21:00 JST)自動実行する。
 - 投稿の型は時間帯ごとに固定(2026-09-19 オーナー決定。夜の連投が似通わないようにするため。`src/index.ts` の `SLOT_BY_JST_HOUR`)。実行時の日本時間の「時」で決まる(GitHub Actionsの遅延は10〜15分程度なので時で判定する)。
-  - 8時台: 悩み共感+使い方(フックは短め)
-  - 18時台: 早見表(悩み→成分の一覧)
-  - 19時台: 「◯◯は買いません」の言い切りリズム
-  - 20時台: 質問だけの投稿(商品・リンク・広告表示なし。`data/posted-log.json` には `productId: "engagement-question"` で記録、返信IDなし)
-  - 21時台: 使い方の手順(①②③中心)
-  - それ以外の時刻(手動実行など)は型を指定しない。ドライランでは `npm run post:dry -- --slot=<morning|cheatsheet|decisive|question|steps>` で型を指定できる。
+  - 8時台・18時台: 早見表(悩み→成分の一覧。この2枠は2026-09-21のオーナー決定で、成績が良かった型に固定)
+  - 19時台・20時台・21時台: 「おすすめ」フィードの調査で集めた伸びている投稿から、実行ごとに1件をランダムに選び、その構成(書き出し・改行・言いかけの引き・締め方)に沿って書く(型名は `feed`。お手本の話題・数字は使わない)。集めた投稿が無いときは型を指定しない。
+  - 以前の型(悩み共感+使い方 `morning`・買いません型 `decisive`・手順型 `steps`・質問だけ `question`)はコードに残してあるが、今は時間割に入れていない。`SLOT_BY_JST_HOUR` を書き換えれば戻せる(質問だけの投稿は商品・リンク・広告表示なし、`productId: "engagement-question"` で記録)。
+  - それ以外の時刻(手動実行など)は型を指定しない。ドライランでは `npm run post:dry -- --slot=<morning|cheatsheet|decisive|question|steps|feed>` で型を指定できる。
 - `.github/workflows/insights.yml` が毎日22:30 JSTに閲覧数などを自動記録する。
 
 頻度はどれもcron式を編集して調整可能。GitHub Actionsの画面から手動実行(`workflow_dispatch`)もでき、投稿ワークフローでは `dry_run: true` を指定すると投稿せず生成だけ確認できる。
