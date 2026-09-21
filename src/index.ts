@@ -116,7 +116,7 @@ async function main(): Promise<void> {
   const products = readJson<Product[]>(PRODUCTS_PATH);
   // Other-genre "structure only" examples can be switched off instantly here,
   // without waiting for the next research run (see data/research-settings.json).
-  const researchSettings = readJson<{ includeOtherGenreStyles: boolean }>(RESEARCH_SETTINGS_PATH);
+  const researchSettings = readJson<{ includeOtherGenreStyles: boolean; attachCheatsheetCard?: boolean }>(RESEARCH_SETTINGS_PATH);
   const styleExamples = readJson<StyleExample[]>(STYLE_EXAMPLES_PATH).filter(
     (example) => example.genre !== "other" || researchSettings.includeOtherGenreStyles
   );
@@ -157,7 +157,8 @@ async function main(): Promise<void> {
   // decision). A failure to render or host it must never block the post: it
   // simply goes out without the card.
   let cardUrl: string | undefined;
-  if (slot === "cheatsheet") {
+  // attachCheatsheetCard in data/research-settings.json is the on/off switch.
+  if (slot === "cheatsheet" && researchSettings.attachCheatsheetCard !== false) {
     try {
       const rows = parseCheatsheetRows(hook);
       if (!hasEnoughRows(rows)) {
