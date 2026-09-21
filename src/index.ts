@@ -6,6 +6,8 @@ import {
   type Product,
   type StyleExample,
 } from "./contentGenerator.js";
+import { hostCardOnGitHub } from "./cardHosting.js";
+import { hasEnoughRows, parseCheatsheetRows, renderCheatsheetCard } from "./cardRenderer.js";
 import { postToThreads, postReplyToThreads } from "./threadsClient.js";
 
 const PRODUCTS_PATH = "data/products.json";
@@ -151,8 +153,31 @@ async function main(): Promise<void> {
   // fixed banner image; fall back to the product image if there is no
   // trending photo, or if the trending photo's URL has since expired (these
   // are hotlinked from Threads' own CDN, whose URLs are time-limited).
-  const trendImageUrl = pickTrendImageUrl(styleExamples);
-  const imageUrl = trendImageUrl ?? product.imageUrl;
+  // Cheat-sheet posts get a self-made card image of the table (2026-09-21 owner
+  // decision). A failure to render or host it must never block the post: it
+  // simply goes out without the card.
+  let cardUrl: string | undefined;
+  if (slot === "cheatsheet") {
+    try {
+      const rows = parseCheatsheetRows(hook);
+      if (!hasEnoughRows(rows)) {
+        console.log(`Card skipped: only ${rows.length} table row(s) found in the hook.`);
+      } else if (dryRun) {
+        const previewPath = await renderCheatsheetCard(rows, `cards/preview-${Date.now()}.png`);
+        console.log(`Card preview rendered: ${previewPath}`);
+      } else {
+        const cardPath = await renderCheatsheetCard(rows, `cards/card-${Date.now()}.png`);
+        cardUrl = await hostCardOnGitHub(cardPath);
+        console.log(`Card hosted: ${cardUrl}`);
+      }
+    } catch (error) {
+      console.warn(`Card skipped, posting without it: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+
+  const trendImageUrl = cardUrl ? undefined : pickTrendImageUrl(styleExamples);
+  const attachedImageUrl = cardUrl ?? trendImageUrl;
+  const imageUrl = attachedImageUrl ?? product.imageUrl;
 
   // The ad disclosure required by the stealth-marketing regulation (景品表示法)
   // lives in this reply rather than the new post's body (2026-09-17 owner
@@ -173,7 +198,9 @@ async function main(): Promise<void> {
   console.log("=== Generated reply (body + affiliate link) ===");
   console.log(replyText);
   console.log("=================================================");
-  console.log(`Image: ${imageUrl ?? "(none)"}${trendImageUrl ? " (from a trending-post example)" : ""}`);
+  console.log(
+    `Image: ${imageUrl ?? "(none)"}${cardUrl ? " (self-made cheat-sheet card)" : trendImageUrl ? " (from a trending-post example)" : ""}`
+  );
 
   if (dryRun) {
     console.log("Dry run: skipping actual post to Threads.");
@@ -185,9 +212,9 @@ async function main(): Promise<void> {
   try {
     threadsPostId = await postToThreads(hook, imageUrl);
   } catch (error) {
-    if (trendImageUrl && imageUrl !== product.imageUrl) {
+    if (attachedImageUrl && imageUrl !== product.imageUrl) {
       console.warn(
-        `Posting with the trending-post image failed (likely an expired URL), retrying with the product image instead: ${
+        `Posting with the attached image failed (e.g. an expired or unreachable URL), retrying with the product image instead: ${
           error instanceof Error ? error.message : error
         }`
       );
