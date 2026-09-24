@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import {
   generatePostText,
   generateQuestionPost,
@@ -14,6 +14,7 @@ const PRODUCTS_PATH = "data/products.json";
 const STYLE_EXAMPLES_PATH = "data/style-examples.json";
 const POSTED_LOG_PATH = "data/posted-log.json";
 const RESEARCH_SETTINGS_PATH = "data/research-settings.json";
+const OWN_IMAGES_DIR = "images";
 
 interface PostedLogEntry {
   productId: string;
@@ -21,6 +22,8 @@ interface PostedLogEntry {
   threadsPostId: string;
   // Absent for question-only posts, which have no reply.
   threadsReplyId?: string;
+  // File name (inside images/) of the owner-supplied image attached, if any.
+  ownImageFile?: string;
 }
 
 type Slot = PostStyle | "question";
@@ -72,6 +75,46 @@ function pickTrendImageUrl(styleExamples: StyleExample[]): string | undefined {
   return withImages[Math.floor(Math.random() * withImages.length)].imageUrl;
 }
 
+// Owner-supplied images are only attached during a specific one-time JST
+// date+hour window set in data/research-settings.json (2026-09-25 owner
+// decision: a given batch of images is for one specific post, not a standing
+// rotation used by every future run). The window naturally stops matching
+// once that hour has passed, so no cleanup is needed afterward; to use images/
+// again later, the owner sets a new date/hour.
+function isOneTimeOwnImageWindow(config?: { date: string; hour: number }): boolean {
+  if (!config) return false;
+  const now = new Date();
+  const jstDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(now);
+  const jstHour = Number(
+    new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", hour: "numeric", hourCycle: "h23" }).format(now)
+  );
+  return jstDate === config.date && jstHour === config.hour;
+}
+
+// Owner-supplied images (2026-09-21 owner decision: made with the owner's own
+// AI image tool and dropped into images/, instead of reusing other users'
+// photos). They are committed to this public repo, so the raw.githubusercontent
+// URL works as the public image URL Threads requires. Avoids repeating the
+// image used by the previous post when there is more than one.
+function pickOwnImage(log: PostedLogEntry[]): { file: string; url: string } | undefined {
+  if (!existsSync(OWN_IMAGES_DIR)) return undefined;
+  const files = readdirSync(OWN_IMAGES_DIR).filter((name) => /\.(jpe?g|png)$/i.test(name));
+  if (files.length === 0) return undefined;
+  const repository = process.env.GITHUB_REPOSITORY;
+  const branch = process.env.GITHUB_REF_NAME;
+  if (!repository || !branch) {
+    console.log("Own images exist, but not running inside GitHub Actions: no public URL to use.");
+    return undefined;
+  }
+  const lastUsed = [...log].reverse().find((entry) => entry.ownImageFile)?.ownImageFile;
+  const candidates = files.length > 1 ? files.filter((name) => name !== lastUsed) : files;
+  const file = candidates[Math.floor(Math.random() * candidates.length)];
+  return {
+    file,
+    url: `https://raw.githubusercontent.com/${repository}/${branch}/${OWN_IMAGES_DIR}/${encodeURIComponent(file)}`,
+  };
+}
+
 function pickNextProduct(products: Product[], log: PostedLogEntry[]): Product {
   const lastPostedAt = new Map<string, string>();
   for (const entry of log) {
@@ -116,7 +159,11 @@ async function main(): Promise<void> {
   const products = readJson<Product[]>(PRODUCTS_PATH);
   // Other-genre "structure only" examples can be switched off instantly here,
   // without waiting for the next research run (see data/research-settings.json).
-  const researchSettings = readJson<{ includeOtherGenreStyles: boolean; attachCheatsheetCard?: boolean }>(RESEARCH_SETTINGS_PATH);
+  const researchSettings = readJson<{
+    includeOtherGenreStyles: boolean;
+    attachCheatsheetCard?: boolean;
+    oneTimeOwnImage?: { date: string; hour: number };
+  }>(RESEARCH_SETTINGS_PATH);
   const styleExamples = readJson<StyleExample[]>(STYLE_EXAMPLES_PATH).filter(
     (example) => example.genre !== "other" || researchSettings.includeOtherGenreStyles
   );
@@ -176,8 +223,15 @@ async function main(): Promise<void> {
     }
   }
 
-  const trendImageUrl = cardUrl ? undefined : pickTrendImageUrl(styleExamples);
-  const attachedImageUrl = cardUrl ?? trendImageUrl;
+  // Cheat-sheet posts keep their card (or the old fallbacks). Every other post
+  // prefers an image from the owner's images/ folder, but only during the
+  // one-time window configured for it (see isOneTimeOwnImageWindow above).
+  const ownImage =
+    slot === "cheatsheet" || cardUrl || !isOneTimeOwnImageWindow(researchSettings.oneTimeOwnImage)
+      ? undefined
+      : pickOwnImage(log);
+  const trendImageUrl = cardUrl || ownImage ? undefined : pickTrendImageUrl(styleExamples);
+  const attachedImageUrl = cardUrl ?? ownImage?.url ?? trendImageUrl;
   const imageUrl = attachedImageUrl ?? product.imageUrl;
 
   // The ad disclosure required by the stealth-marketing regulation (景品表示法)
@@ -200,7 +254,7 @@ async function main(): Promise<void> {
   console.log(replyText);
   console.log("=================================================");
   console.log(
-    `Image: ${imageUrl ?? "(none)"}${cardUrl ? " (self-made cheat-sheet card)" : trendImageUrl ? " (from a trending-post example)" : ""}`
+    `Image: ${imageUrl ?? "(none)"}${cardUrl ? " (self-made cheat-sheet card)" : ownImage ? " (owner-supplied image)" : trendImageUrl ? " (from a trending-post example)" : ""}`
   );
 
   if (dryRun) {
@@ -246,6 +300,7 @@ async function main(): Promise<void> {
     postedAt: new Date().toISOString(),
     threadsPostId,
     threadsReplyId,
+    ...(ownImage ? { ownImageFile: ownImage.file } : {}),
   });
   writeFileSync(POSTED_LOG_PATH, JSON.stringify(log, null, 2) + "\n");
 }

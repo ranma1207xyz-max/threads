@@ -1,5 +1,6 @@
 {
   "includeOtherGenreStyles": true,
   "attachCheatsheetCard": false,
-  "maxOtherGenreExamples": 4
+  "maxOtherGenreExamples": 4,
+  "oneTimeOwnImage": { "date": "2026-09-25", "hour": 20 }
 }
