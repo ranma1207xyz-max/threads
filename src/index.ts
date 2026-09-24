@@ -81,8 +81,7 @@ function pickTrendImageUrl(styleExamples: StyleExample[]): string | undefined {
 // specific post rather than a standing behavior for every future run. The
 // window naturally stops matching once that hour has passed, so no cleanup is
 // needed afterward; to use it again later, the owner sets a new date/hour.
-function isJstMoment(config?: { date: string; hour: number }): boolean {
-  if (!config) return false;
+function isJstMoment(config: { date: string; hour: number }): boolean {
   const now = new Date();
   const jstDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(now);
   const jstHour = Number(
@@ -91,24 +90,46 @@ function isJstMoment(config?: { date: string; hour: number }): boolean {
   return jstDate === config.date && jstHour === config.hour;
 }
 
+// Each override is a list so more than one specific post (e.g. today's 20:00
+// AND 21:00) can each have their own one-time setup at the same time, without
+// one overwriting the other. Returns the entry whose date+hour matches right
+// now, if any — normally at most one ever matches.
+function findJstMoment<T extends { date: string; hour: number }>(entries?: T[]): T | undefined {
+  return entries?.find(isJstMoment);
+}
+
 // Owner-supplied images (2026-09-21 owner decision: made with the owner's own
 // AI image tool and dropped into images/, instead of reusing other users'
 // photos). They are committed to this public repo, so the raw.githubusercontent
 // URL works as the public image URL Threads requires. Avoids repeating the
 // image used by the previous post when there is more than one.
-function pickOwnImage(log: PostedLogEntry[]): { file: string; url: string } | undefined {
+//
+// forcedFile (2026-09-25 owner decision) picks one exact file instead of a
+// random one from the whole folder — needed once images/ can hold pictures
+// for more than one distinct one-time post at once (each must only ever be
+// attached to its own post, never accidentally swapped with another).
+function pickOwnImage(log: PostedLogEntry[], forcedFile?: string): { file: string; url: string } | undefined {
   if (!existsSync(OWN_IMAGES_DIR)) return undefined;
-  const files = readdirSync(OWN_IMAGES_DIR).filter((name) => /\.(jpe?g|png)$/i.test(name));
-  if (files.length === 0) return undefined;
   const repository = process.env.GITHUB_REPOSITORY;
   const branch = process.env.GITHUB_REF_NAME;
   if (!repository || !branch) {
     console.log("Own images exist, but not running inside GitHub Actions: no public URL to use.");
     return undefined;
   }
-  const lastUsed = [...log].reverse().find((entry) => entry.ownImageFile)?.ownImageFile;
-  const candidates = files.length > 1 ? files.filter((name) => name !== lastUsed) : files;
-  const file = candidates[Math.floor(Math.random() * candidates.length)];
+  let file: string;
+  if (forcedFile) {
+    if (!existsSync(`${OWN_IMAGES_DIR}/${forcedFile}`)) {
+      console.warn(`Configured own image "${forcedFile}" was not found in ${OWN_IMAGES_DIR}/. Skipping it.`);
+      return undefined;
+    }
+    file = forcedFile;
+  } else {
+    const files = readdirSync(OWN_IMAGES_DIR).filter((name) => /\.(jpe?g|png)$/i.test(name));
+    if (files.length === 0) return undefined;
+    const lastUsed = [...log].reverse().find((entry) => entry.ownImageFile)?.ownImageFile;
+    const candidates = files.length > 1 ? files.filter((name) => name !== lastUsed) : files;
+    file = candidates[Math.floor(Math.random() * candidates.length)];
+  }
   return {
     file,
     url: `https://raw.githubusercontent.com/${repository}/${branch}/${OWN_IMAGES_DIR}/${encodeURIComponent(file)}`,
@@ -162,8 +183,13 @@ async function main(): Promise<void> {
   const researchSettings = readJson<{
     includeOtherGenreStyles: boolean;
     attachCheatsheetCard?: boolean;
-    oneTimeOwnImage?: { date: string; hour: number };
-    oneTimeText?: { date: string; hour: number; hook: string; body: string };
+    oneTimeOwnImage?: { date: string; hour: number; file?: string }[];
+    // url/productId (2026-09-25 owner decision): lets a one-time post advertise
+    // something outside data/products.json (e.g. a single guest product) —
+    // the reply link uses `url` instead of the rotated product's, and the
+    // posted-log entry uses `productId` instead of the rotated product's id,
+    // so it never gets mixed into the normal rotation's own history.
+    oneTimeText?: { date: string; hour: number; hook: string; body: string; url?: string; productId?: string }[];
   }>(RESEARCH_SETTINGS_PATH);
   const styleExamples = readJson<StyleExample[]>(STYLE_EXAMPLES_PATH).filter(
     (example) => example.genre !== "other" || researchSettings.includeOtherGenreStyles
@@ -197,7 +223,7 @@ async function main(): Promise<void> {
   // oneTimeText (2026-09-25 owner decision) lets the owner fix the exact hook
   // and body for one specific post — e.g. to match a reference post's tone —
   // instead of the usual AI generation, during its configured JST window only.
-  const oneTimeText = isJstMoment(researchSettings.oneTimeText) ? researchSettings.oneTimeText : undefined;
+  const oneTimeText = findJstMoment(researchSettings.oneTimeText);
   const { hook, body } = oneTimeText ?? (await generatePostText(product, styleExamples, slot));
 
   // Prefer a photo from one of this run's trending-post examples (adds
@@ -229,12 +255,11 @@ async function main(): Promise<void> {
   }
 
   // Cheat-sheet posts keep their card (or the old fallbacks). Every other post
-  // prefers an image from the owner's images/ folder, but only during the
-  // one-time window configured for it (see isOneTimeOwnImageWindow above).
+  // prefers an image from the owner's images/ folder, but only during a
+  // one-time window configured for it (see findJstMoment above).
+  const ownImageConfig = findJstMoment(researchSettings.oneTimeOwnImage);
   const ownImage =
-    slot === "cheatsheet" || cardUrl || !isJstMoment(researchSettings.oneTimeOwnImage)
-      ? undefined
-      : pickOwnImage(log);
+    slot === "cheatsheet" || cardUrl || !ownImageConfig ? undefined : pickOwnImage(log, ownImageConfig.file);
   const trendImageUrl = cardUrl || ownImage ? undefined : pickTrendImageUrl(styleExamples);
   const attachedImageUrl = cardUrl ?? ownImage?.url ?? trendImageUrl;
   const imageUrl = attachedImageUrl ?? product.imageUrl;
@@ -251,7 +276,8 @@ async function main(): Promise<void> {
   // whole change in the first place. Full removal of any disclosure was
   // considered and rejected — that would be a clear-cut stealth-marketing
   // violation, not just a borderline one, so this is the floor.
-  const replyText = `${body}\n\n${product.url} pr`;
+  const linkUrl = oneTimeText?.url ?? product.url;
+  const replyText = `${body}\n\n${linkUrl} pr`;
 
   console.log("=== Generated hook (new post) ===");
   console.log(hook);
@@ -301,7 +327,7 @@ async function main(): Promise<void> {
   console.log(`STEP 3 done: posted affiliate link as a reply. threadsReplyId=${threadsReplyId}`);
 
   log.push({
-    productId: product.id,
+    productId: oneTimeText?.productId ?? product.id,
     postedAt: new Date().toISOString(),
     threadsPostId,
     threadsReplyId,

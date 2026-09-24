@@ -2,14 +2,31 @@
   "includeOtherGenreStyles": true,
   "attachCheatsheetCard": false,
   "maxOtherGenreExamples": 4,
-  "oneTimeOwnImage": {
-    "date": "2026-09-25",
-    "hour": 20
-  },
-  "oneTimeText": {
-    "date": "2026-09-25",
-    "hour": 20,
-    "hook": "飛行機で乾燥がやばかったとき\n教えてもらったやつ、ほんと沼った🤍\nくすみが気になる肌に、そっと効いてくる感じ",
-    "body": "どんな製品か気になる人には、ここにリンクを教えるね！"
-  }
+  "oneTimeOwnImage": [
+    {
+      "date": "2026-09-25",
+      "hour": 20
+    },
+    {
+      "date": "2026-09-25",
+      "hour": 21,
+      "file": "70330.jpg"
+    }
+  ],
+  "oneTimeText": [
+    {
+      "date": "2026-09-25",
+      "hour": 20,
+      "hook": "飛行機で乾燥がやばかったとき\n教えてもらったやつ、ほんと沼った🤍\nくすみが気になる肌に、そっと効いてくる感じ",
+      "body": "どんな製品か気になる人には、ここにリンクを教えるね！"
+    },
+    {
+      "date": "2026-09-25",
+      "hour": 21,
+      "hook": "飛行機乗ったとき良い香りすぎて\n教えてもらったやつ、ほんと癒し💞",
+      "body": "どんな製品か気になる人には、ここにリンクを教えるね！",
+      "url": "https://a.r10.to/hPyhfS",
+      "productId": "one-time:2026-09-25-21-aesop-marrakech-intense"
+    }
+  ]
 }
