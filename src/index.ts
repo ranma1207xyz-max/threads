@@ -8,7 +8,7 @@ import {
 } from "./contentGenerator.js";
 import { hostCardOnGitHub } from "./cardHosting.js";
 import { hasEnoughRows, parseCheatsheetRows, renderCheatsheetCard } from "./cardRenderer.js";
-import { postToThreads, postReplyToThreads } from "./threadsClient.js";
+import { postToThreads, postCarouselToThreads, postReplyToThreads } from "./threadsClient.js";
 
 const PRODUCTS_PATH = "data/products.json";
 const STYLE_EXAMPLES_PATH = "data/style-examples.json";
@@ -22,8 +22,9 @@ interface PostedLogEntry {
   threadsPostId: string;
   // Absent for question-only posts, which have no reply.
   threadsReplyId?: string;
-  // File name (inside images/) of the owner-supplied image attached, if any.
-  ownImageFile?: string;
+  // File name(s) (inside images/) of the owner-supplied image(s) attached, if
+  // any — more than one when it was posted as a carousel.
+  ownImageFiles?: string[];
 }
 
 type Slot = PostStyle | "question";
@@ -98,17 +99,28 @@ function findJstMoment<T extends { date: string; hour: number }>(entries?: T[]):
   return entries?.find(isJstMoment);
 }
 
+interface OwnImageConfig {
+  date: string;
+  hour: number;
+  // Exact file for a single-image post. Ignored if `files` is also set.
+  file?: string;
+  // Exact files, in order, for a carousel (multi-photo) post — e.g. a
+  // reference post's own "1/2, 2/2" layout (2026-09-25 owner decision).
+  files?: string[];
+}
+
 // Owner-supplied images (2026-09-21 owner decision: made with the owner's own
 // AI image tool and dropped into images/, instead of reusing other users'
 // photos). They are committed to this public repo, so the raw.githubusercontent
-// URL works as the public image URL Threads requires. Avoids repeating the
-// image used by the previous post when there is more than one.
+// URL works as the public image URL Threads requires.
 //
-// forcedFile (2026-09-25 owner decision) picks one exact file instead of a
-// random one from the whole folder — needed once images/ can hold pictures
+// `files` / `file` (2026-09-25 owner decision) pick exact file(s) instead of
+// a random one from the whole folder — needed once images/ can hold pictures
 // for more than one distinct one-time post at once (each must only ever be
-// attached to its own post, never accidentally swapped with another).
-function pickOwnImage(log: PostedLogEntry[], forcedFile?: string): { file: string; url: string } | undefined {
+// attached to its own post, never accidentally swapped with another). With
+// neither set, falls back to a random pick from the folder, avoiding the
+// image used by the previous post when there is more than one.
+function pickOwnImages(log: PostedLogEntry[], config: OwnImageConfig): { files: string[]; urls: string[] } | undefined {
   if (!existsSync(OWN_IMAGES_DIR)) return undefined;
   const repository = process.env.GITHUB_REPOSITORY;
   const branch = process.env.GITHUB_REF_NAME;
@@ -116,24 +128,31 @@ function pickOwnImage(log: PostedLogEntry[], forcedFile?: string): { file: strin
     console.log("Own images exist, but not running inside GitHub Actions: no public URL to use.");
     return undefined;
   }
-  let file: string;
-  if (forcedFile) {
-    if (!existsSync(`${OWN_IMAGES_DIR}/${forcedFile}`)) {
-      console.warn(`Configured own image "${forcedFile}" was not found in ${OWN_IMAGES_DIR}/. Skipping it.`);
+  const toUrl = (file: string) =>
+    `https://raw.githubusercontent.com/${repository}/${branch}/${OWN_IMAGES_DIR}/${encodeURIComponent(file)}`;
+
+  if (config.files && config.files.length > 0) {
+    const missing = config.files.filter((name) => !existsSync(`${OWN_IMAGES_DIR}/${name}`));
+    if (missing.length > 0) {
+      console.warn(`Configured own images not found: ${missing.join(", ")}. Skipping the whole set.`);
       return undefined;
     }
-    file = forcedFile;
-  } else {
-    const files = readdirSync(OWN_IMAGES_DIR).filter((name) => /\.(jpe?g|png)$/i.test(name));
-    if (files.length === 0) return undefined;
-    const lastUsed = [...log].reverse().find((entry) => entry.ownImageFile)?.ownImageFile;
-    const candidates = files.length > 1 ? files.filter((name) => name !== lastUsed) : files;
-    file = candidates[Math.floor(Math.random() * candidates.length)];
+    return { files: config.files, urls: config.files.map(toUrl) };
   }
-  return {
-    file,
-    url: `https://raw.githubusercontent.com/${repository}/${branch}/${OWN_IMAGES_DIR}/${encodeURIComponent(file)}`,
-  };
+  if (config.file) {
+    if (!existsSync(`${OWN_IMAGES_DIR}/${config.file}`)) {
+      console.warn(`Configured own image "${config.file}" was not found in ${OWN_IMAGES_DIR}/. Skipping it.`);
+      return undefined;
+    }
+    return { files: [config.file], urls: [toUrl(config.file)] };
+  }
+
+  const files = readdirSync(OWN_IMAGES_DIR).filter((name) => /\.(jpe?g|png)$/i.test(name));
+  if (files.length === 0) return undefined;
+  const lastUsed = [...log].reverse().find((entry) => entry.ownImageFiles?.length === 1)?.ownImageFiles?.[0];
+  const candidates = files.length > 1 ? files.filter((name) => name !== lastUsed) : files;
+  const file = candidates[Math.floor(Math.random() * candidates.length)];
+  return { files: [file], urls: [toUrl(file)] };
 }
 
 function pickNextProduct(products: Product[], log: PostedLogEntry[]): Product {
@@ -183,7 +202,7 @@ async function main(): Promise<void> {
   const researchSettings = readJson<{
     includeOtherGenreStyles: boolean;
     attachCheatsheetCard?: boolean;
-    oneTimeOwnImage?: { date: string; hour: number; file?: string }[];
+    oneTimeOwnImage?: OwnImageConfig[];
     // url/productId (2026-09-25 owner decision): lets a one-time post advertise
     // something outside data/products.json (e.g. a single guest product) —
     // the reply link uses `url` instead of the rotated product's, and the
@@ -258,11 +277,15 @@ async function main(): Promise<void> {
   // prefers an image from the owner's images/ folder, but only during a
   // one-time window configured for it (see findJstMoment above).
   const ownImageConfig = findJstMoment(researchSettings.oneTimeOwnImage);
-  const ownImage =
-    slot === "cheatsheet" || cardUrl || !ownImageConfig ? undefined : pickOwnImage(log, ownImageConfig.file);
-  const trendImageUrl = cardUrl || ownImage ? undefined : pickTrendImageUrl(styleExamples);
-  const attachedImageUrl = cardUrl ?? ownImage?.url ?? trendImageUrl;
-  const imageUrl = attachedImageUrl ?? product.imageUrl;
+  const ownImages =
+    slot === "cheatsheet" || cardUrl || !ownImageConfig ? undefined : pickOwnImages(log, ownImageConfig);
+  const trendImageUrl = cardUrl || ownImages ? undefined : pickTrendImageUrl(styleExamples);
+  // attachedImageUrls may hold more than one URL only for an owner-supplied
+  // carousel (see OwnImageConfig.files above); every other source is a single
+  // image. `imageUrl` (its first/only entry) is what the single-image posting
+  // path and its own-product-image fallback below use.
+  const attachedImageUrls = cardUrl ? [cardUrl] : ownImages ? ownImages.urls : trendImageUrl ? [trendImageUrl] : undefined;
+  const imageUrl = attachedImageUrls?.[0] ?? product.imageUrl;
 
   // The ad disclosure required by the stealth-marketing regulation (景品表示法)
   // lives in this reply rather than the new post's body (2026-09-17 owner
@@ -285,7 +308,17 @@ async function main(): Promise<void> {
   console.log(replyText);
   console.log("=================================================");
   console.log(
-    `Image: ${imageUrl ?? "(none)"}${cardUrl ? " (self-made cheat-sheet card)" : ownImage ? " (owner-supplied image)" : trendImageUrl ? " (from a trending-post example)" : ""}`
+    `Image: ${attachedImageUrls ? attachedImageUrls.join(" | ") : imageUrl ?? "(none)"}${
+      cardUrl
+        ? " (self-made cheat-sheet card)"
+        : ownImages
+        ? ownImages.files.length > 1
+          ? ` (owner-supplied carousel: ${ownImages.files.join(" -> ")})`
+          : " (owner-supplied image)"
+        : trendImageUrl
+        ? " (from a trending-post example)"
+        : ""
+    }`
   );
 
   if (dryRun) {
@@ -293,14 +326,19 @@ async function main(): Promise<void> {
     return;
   }
 
-  // STEP 1: post the hook as a new top-level post.
+  // STEP 1: post the hook as a new top-level post. A carousel (2+ owner
+  // images) uses its own dedicated posting call; everything else is the
+  // existing single-image-or-text path.
   let threadsPostId: string;
   try {
-    threadsPostId = await postToThreads(hook, imageUrl);
+    threadsPostId =
+      attachedImageUrls && attachedImageUrls.length > 1
+        ? await postCarouselToThreads(hook, attachedImageUrls)
+        : await postToThreads(hook, imageUrl);
   } catch (error) {
-    if (attachedImageUrl && imageUrl !== product.imageUrl) {
+    if (attachedImageUrls && imageUrl !== product.imageUrl) {
       console.warn(
-        `Posting with the attached image failed (e.g. an expired or unreachable URL), retrying with the product image instead: ${
+        `Posting with the attached image(s) failed (e.g. an expired or unreachable URL), retrying with the product image instead: ${
           error instanceof Error ? error.message : error
         }`
       );
@@ -331,7 +369,7 @@ async function main(): Promise<void> {
     postedAt: new Date().toISOString(),
     threadsPostId,
     threadsReplyId,
-    ...(ownImage ? { ownImageFile: ownImage.file } : {}),
+    ...(ownImages ? { ownImageFiles: ownImages.files } : {}),
   });
   writeFileSync(POSTED_LOG_PATH, JSON.stringify(log, null, 2) + "\n");
 }

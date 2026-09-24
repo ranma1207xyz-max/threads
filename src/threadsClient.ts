@@ -59,6 +59,32 @@ export async function postToThreads(text: string, imageUrl?: string): Promise<st
   return createAndPublishContainer(containerParams);
 }
 
+// A carousel (multiple photos swipeable in one post — e.g. a "1/2, 2/2" post,
+// matching how a reference post the owner shared showed two photos together;
+// 2026-09-25 owner decision). Threads' API needs each photo created as its
+// own "carousel item" container first (not published individually), then a
+// parent CAROUSEL container listing them via `children` in the given order,
+// which is the one that actually gets published.
+export async function postCarouselToThreads(text: string, imageUrls: string[]): Promise<string> {
+  if (imageUrls.length < 2) {
+    throw new Error(`postCarouselToThreads needs at least 2 images, got ${imageUrls.length}.`);
+  }
+  const itemIds: string[] = [];
+  for (const imageUrl of imageUrls) {
+    const item = await graphPost(`${config.threadsUserId}/threads`, {
+      media_type: "IMAGE",
+      image_url: imageUrl,
+      is_carousel_item: "true",
+    });
+    itemIds.push(item.id);
+  }
+  return createAndPublishContainer({
+    media_type: "CAROUSEL",
+    children: itemIds.join(","),
+    text,
+  });
+}
+
 // Posts a self-reply to an existing Threads post. Uses the same two-step
 // container+publish flow as postToThreads, with reply_to_id set to the
 // parent post's ID (the Threads API's documented way to attach a reply).

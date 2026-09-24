@@ -5,7 +5,11 @@
   "oneTimeOwnImage": [
     {
       "date": "2026-09-25",
-      "hour": 20
+      "hour": 20,
+      "files": [
+        "70320.jpg",
+        "70321.jpg"
+      ]
     },
     {
       "date": "2026-09-25",
