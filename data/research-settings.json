@@ -2,5 +2,14 @@
   "includeOtherGenreStyles": true,
   "attachCheatsheetCard": false,
   "maxOtherGenreExamples": 4,
-  "oneTimeOwnImage": { "date": "2026-09-25", "hour": 20 }
+  "oneTimeOwnImage": {
+    "date": "2026-09-25",
+    "hour": 20
+  },
+  "oneTimeText": {
+    "date": "2026-09-25",
+    "hour": 20,
+    "hook": "飛行機で乾燥がやばかったとき\n教えてもらったやつ、ほんと沼った🤍\nくすみが気になる肌に、そっと効いてくる感じ",
+    "body": "どんな製品か気になる人には、ここにリンクを教えるね！"
+  }
 }

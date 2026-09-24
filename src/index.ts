@@ -75,13 +75,13 @@ function pickTrendImageUrl(styleExamples: StyleExample[]): string | undefined {
   return withImages[Math.floor(Math.random() * withImages.length)].imageUrl;
 }
 
-// Owner-supplied images are only attached during a specific one-time JST
-// date+hour window set in data/research-settings.json (2026-09-25 owner
-// decision: a given batch of images is for one specific post, not a standing
-// rotation used by every future run). The window naturally stops matching
-// once that hour has passed, so no cleanup is needed afterward; to use images/
-// again later, the owner sets a new date/hour.
-function isOneTimeOwnImageWindow(config?: { date: string; hour: number }): boolean {
+// Shared by the one-time overrides below (owner-supplied image, owner-fixed
+// text): true only during the specific JST date+hour the owner configured for
+// that override in data/research-settings.json, so each is scoped to one
+// specific post rather than a standing behavior for every future run. The
+// window naturally stops matching once that hour has passed, so no cleanup is
+// needed afterward; to use it again later, the owner sets a new date/hour.
+function isJstMoment(config?: { date: string; hour: number }): boolean {
   if (!config) return false;
   const now = new Date();
   const jstDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(now);
@@ -163,6 +163,7 @@ async function main(): Promise<void> {
     includeOtherGenreStyles: boolean;
     attachCheatsheetCard?: boolean;
     oneTimeOwnImage?: { date: string; hour: number };
+    oneTimeText?: { date: string; hour: number; hook: string; body: string };
   }>(RESEARCH_SETTINGS_PATH);
   const styleExamples = readJson<StyleExample[]>(STYLE_EXAMPLES_PATH).filter(
     (example) => example.genre !== "other" || researchSettings.includeOtherGenreStyles
@@ -193,7 +194,11 @@ async function main(): Promise<void> {
   // The new post carries only the short hook; the persuasive body text goes
   // into the self-reply alongside the affiliate link (2026-09-18 owner
   // decision), instead of the whole thing living in the new post as before.
-  const { hook, body } = await generatePostText(product, styleExamples, slot);
+  // oneTimeText (2026-09-25 owner decision) lets the owner fix the exact hook
+  // and body for one specific post — e.g. to match a reference post's tone —
+  // instead of the usual AI generation, during its configured JST window only.
+  const oneTimeText = isJstMoment(researchSettings.oneTimeText) ? researchSettings.oneTimeText : undefined;
+  const { hook, body } = oneTimeText ?? (await generatePostText(product, styleExamples, slot));
 
   // Prefer a photo from one of this run's trending-post examples (adds
   // variety and matches what's currently resonating) over the product's own
@@ -227,7 +232,7 @@ async function main(): Promise<void> {
   // prefers an image from the owner's images/ folder, but only during the
   // one-time window configured for it (see isOneTimeOwnImageWindow above).
   const ownImage =
-    slot === "cheatsheet" || cardUrl || !isOneTimeOwnImageWindow(researchSettings.oneTimeOwnImage)
+    slot === "cheatsheet" || cardUrl || !isJstMoment(researchSettings.oneTimeOwnImage)
       ? undefined
       : pickOwnImage(log);
   const trendImageUrl = cardUrl || ownImage ? undefined : pickTrendImageUrl(styleExamples);
