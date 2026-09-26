@@ -248,6 +248,17 @@ async function main(): Promise<void> {
   const oneTimeText = findJstMoment(researchSettings.oneTimeText);
   const { hook, body } = oneTimeText ?? (await generatePostText(product, styleExamples, slot));
 
+  // A one-time override (oneTimeText and/or oneTimeOwnImage matching this
+  // exact date/hour) replaces the slot's usual content for this one post —
+  // it must win over the slot's default type entirely, including which
+  // image gets attached. Without this, forcing every slot to "cheatsheet"
+  // (2026-09-26 owner decision) silently broke oneTimeOwnImage: it only ever
+  // applied to non-cheatsheet slots, so a one-off image+story post like
+  // 9/25's would attach no image at all once every hour became cheatsheet
+  // (bug found 2026-09-27, ahead of trying this style again).
+  const ownImageConfig = findJstMoment(researchSettings.oneTimeOwnImage);
+  const isOneTimeOverrideMoment = Boolean(oneTimeText) || Boolean(ownImageConfig);
+
   // Prefer a photo from one of this run's trending-post examples (adds
   // variety and matches what's currently resonating) over the product's own
   // fixed banner image; fall back to the product image if there is no
@@ -258,7 +269,7 @@ async function main(): Promise<void> {
   // simply goes out without the card.
   let cardUrl: string | undefined;
   // attachCheatsheetCard in data/research-settings.json is the on/off switch.
-  if (slot === "cheatsheet" && researchSettings.attachCheatsheetCard !== false) {
+  if (slot === "cheatsheet" && !isOneTimeOverrideMoment && researchSettings.attachCheatsheetCard !== false) {
     try {
       const rows = parseCheatsheetRows(hook);
       if (!hasEnoughRows(rows)) {
@@ -276,12 +287,12 @@ async function main(): Promise<void> {
     }
   }
 
-  // Cheat-sheet posts keep their card (or the old fallbacks). Every other post
-  // prefers an image from the owner's images/ folder, but only during a
-  // one-time window configured for it (see findJstMoment above).
-  const ownImageConfig = findJstMoment(researchSettings.oneTimeOwnImage);
+  // Cheat-sheet posts keep their card (or the old fallbacks), unless this
+  // moment is a one-time override, in which case its own image always wins.
   const ownImages =
-    slot === "cheatsheet" || cardUrl || !ownImageConfig ? undefined : pickOwnImages(log, ownImageConfig);
+    (slot === "cheatsheet" && !isOneTimeOverrideMoment) || cardUrl || !ownImageConfig
+      ? undefined
+      : pickOwnImages(log, ownImageConfig);
   const trendImageUrl = cardUrl || ownImages ? undefined : pickTrendImageUrl(styleExamples);
   // attachedImageUrls may hold more than one URL only for an owner-supplied
   // carousel (see OwnImageConfig.files above); every other source is a single
