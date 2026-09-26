@@ -29,17 +29,20 @@ interface PostedLogEntry {
 
 type Slot = PostStyle | "question";
 
-// 2026-09-21 owner decision: the first two posts of the day (8:00, 18:00) use
-// the cheat-sheet style, which performed best; the rest follow a style picked
-// from what the research found in the recommended feed. The earlier morning /
-// decisive / steps / question styles are kept in the code but not scheduled;
-// e.g. set 20 back to "question" to bring the question-only post back.
+// 2026-09-26 owner decision: all 5 daily posts now use the cheat-sheet style.
+// Insight data from 9/21 onward showed it far ahead of every other style
+// (avg views: 8:00=491, 18:00=1,579 vs. the "feed" style's 19:00=220,
+// 20:00=395, 21:00=142 — see リサーチ・投稿分析/変更ログ.md), so the owner
+// asked to lean into it everywhere instead of splitting the evening by type.
+// The earlier morning / decisive / steps / feed / question styles are kept in
+// the code but not scheduled; e.g. set 20 back to "question" to bring the
+// question-only post back, or back to "feed" etc. per the pre-9/26 mapping.
 const SLOT_BY_JST_HOUR: Record<number, Slot> = {
   8: "cheatsheet",
   18: "cheatsheet",
-  19: "feed",
-  20: "feed",
-  21: "feed",
+  19: "cheatsheet",
+  20: "cheatsheet",
+  21: "cheatsheet",
 };
 const KNOWN_SLOTS = new Set<string>(["morning", "cheatsheet", "decisive", "question", "steps", "feed"]);
 
