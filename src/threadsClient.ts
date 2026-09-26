@@ -36,11 +36,33 @@ async function graphGet(path: string, params: Record<string, string>): Promise<a
   return body;
 }
 
+// Polls a media container's processing status until Threads reports it
+// FINISHED (ready to publish/reference), instead of assuming a fixed delay is
+// always enough. A single image container was usually done well within the
+// old blind 5s sleep, but a carousel's per-item containers had no wait at
+// all before being referenced as `children` — on 2026-09-25's first real
+// carousel post, this meant the parent container (and the post it produced)
+// went out with the images still not attached, even though the API reported
+// success throughout (bug found 2026-09-27, owner confirmed on Threads that
+// the images never appeared).
+// Docs: https://developers.facebook.com/docs/threads/threads-media/overview
+async function waitForContainerFinished(containerId: string): Promise<void> {
+  const maxAttempts = 20; // 20 x 3s = up to 60s, generous for an image download+validate.
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const status = await graphGet(containerId, { fields: "status,status_code" });
+    if (status.status_code === "FINISHED") return;
+    if (status.status_code === "ERROR" || status.status_code === "EXPIRED") {
+      throw new Error(`Container ${containerId} failed to process: status_code=${status.status_code}`);
+    }
+    await sleep(3000);
+  }
+  throw new Error(`Container ${containerId} did not finish processing within ${maxAttempts * 3}s.`);
+}
+
 async function createAndPublishContainer(containerParams: Record<string, string>): Promise<string> {
   const container = await graphPost(`${config.threadsUserId}/threads`, containerParams);
 
-  // Meta recommends a short pause before publishing to let the container finish processing.
-  await sleep(5000);
+  await waitForContainerFinished(container.id);
 
   const published = await graphPost(`${config.threadsUserId}/threads_publish`, {
     creation_id: container.id,
@@ -76,6 +98,12 @@ export async function postCarouselToThreads(text: string, imageUrls: string[]): 
       image_url: imageUrl,
       is_carousel_item: "true",
     });
+    // Each item must finish downloading/validating its image before the
+    // parent CAROUSEL container is allowed to reference it as a child —
+    // this wait was missing entirely, which is what let 2026-09-25's
+    // carousel post go out with no images attached (see the note above
+    // createAndPublishContainer).
+    await waitForContainerFinished(item.id);
     itemIds.push(item.id);
   }
   return createAndPublishContainer({
