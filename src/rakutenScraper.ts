@@ -33,30 +33,6 @@ export async function openAuthenticatedPage(browser: Browser): Promise<Page> {
   return context.newPage();
 }
 
-// Rakuten's own login session tends to expire faster (and add extra identity
-// checks) than Threads' did — this is the boundary of that risk the owner
-// accepted on 2026-09-27, not something to try to work around here. A failed
-// re-login attempt just throws (below), which is meant to fail loudly rather
-// than silently record wrong numbers.
-async function assertLoggedIn(page: Page): Promise<void> {
-  const loggedOutHeading = await page
-    .locator("text=ログイン")
-    .first()
-    .isVisible({ timeout: 3000 })
-    .catch(() => false);
-  const heading = await page
-    .locator("text=今月の成果情報")
-    .first()
-    .isVisible({ timeout: 10000 })
-    .catch(() => false);
-  if (!heading || loggedOutHeading) {
-    throw new Error(
-      "Rakuten Affiliate mypage did not show the expected 今月の成果情報 section — the saved session " +
-        "has likely expired. Run \"npm run rakuten:login\" again and update RAKUTEN_SESSION_STATE_B64."
-    );
-  }
-}
-
 // Reads a value line following a label line in the page's plain visible text
 // (not a specific CSS selector — nothing about this page's DOM structure was
 // available while writing this, only a screenshot of the rendered result, so
@@ -80,43 +56,69 @@ function parseYenOrNumber(raw: string): number {
   return value;
 }
 
-// Fetches this month's cumulative summary from the マイページ dashboard.
-// Throws rather than guessing if the page layout doesn't match what's
-// expected — see the note on RAKUTEN_DEBUG_SCREENSHOTS in runRakutenReport.ts
-// for how to diagnose a layout change.
-export async function fetchMonthlySummary(page: Page): Promise<RakutenMonthlySummary> {
-  await page.goto(MYPAGE_URL, { waitUntil: "domcontentloaded" });
-  await assertLoggedIn(page);
+interface ExtractionAttempt {
+  sawHeading: boolean;
+  values: Record<"売上金額" | "成果報酬" | "クリック数" | "売上件数", string | null>;
+}
 
-  const bodyText: string = await page.evaluate(() => document.body.innerText);
+function attemptExtraction(bodyText: string): ExtractionAttempt {
   const lines = bodyText
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
+  return {
+    sawHeading: lines.includes("今月の成果情報"),
+    values: {
+      売上金額: findValueAfterLabel(lines, "売上金額"),
+      成果報酬: findValueAfterLabel(lines, "成果報酬"),
+      クリック数: findValueAfterLabel(lines, "クリック数"),
+      売上件数: findValueAfterLabel(lines, "売上件数"),
+    },
+  };
+}
 
-  const salesAmountRaw = findValueAfterLabel(lines, "売上金額");
-  const rewardRaw = findValueAfterLabel(lines, "成果報酬");
-  const clicksRaw = findValueAfterLabel(lines, "クリック数");
-  const salesCountRaw = findValueAfterLabel(lines, "売上件数");
+// Fetches this month's cumulative summary from the マイページ dashboard.
+// The 4 numbers under "今月の成果情報" render as loading spinners at first
+// and are filled in a moment later by a client-side API call the page makes
+// after its own initial load — a single read right after page.goto() can
+// land in that gap and see the heading but no digits yet (hit on
+// 2026-09-27's first real run, before RAKUTEN_SESSION_STATE_B64 was even
+// wrong — the session itself was fine). So this polls, re-reading the body
+// text every few seconds, instead of reading once.
+export async function fetchMonthlySummary(page: Page): Promise<RakutenMonthlySummary> {
+  await page.goto(MYPAGE_URL, { waitUntil: "domcontentloaded" });
 
-  const missing = [
-    ["売上金額", salesAmountRaw],
-    ["成果報酬", rewardRaw],
-    ["クリック数", clicksRaw],
-    ["売上件数", salesCountRaw],
-  ].filter(([, value]) => value === null);
+  const maxAttempts = 15; // 15 x 3s = up to 45s.
+  let lastAttempt: ExtractionAttempt | null = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const bodyText: string = await page.evaluate(() => document.body.innerText);
+    lastAttempt = attemptExtraction(bodyText);
+    const allFound = Object.values(lastAttempt.values).every((v) => v !== null);
+    if (allFound) break;
+    await page.waitForTimeout(3000);
+  }
 
-  if (missing.length > 0) {
+  if (!lastAttempt || !lastAttempt.sawHeading) {
     throw new Error(
-      `Could not find a value for: ${missing.map(([label]) => label).join(", ")}. ` +
-        "Rakuten likely changed the page layout — see RAKUTEN_DEBUG_SCREENSHOTS."
+      "Rakuten Affiliate mypage never showed the expected 今月の成果情報 heading — the saved session " +
+        "has likely expired. Run \"npm run rakuten:login\" again and update RAKUTEN_SESSION_STATE_B64."
+    );
+  }
+
+  const missingLabels = (Object.keys(lastAttempt.values) as (keyof typeof lastAttempt.values)[]).filter(
+    (label) => lastAttempt!.values[label] === null
+  );
+  if (missingLabels.length > 0) {
+    throw new Error(
+      `Could not find a value for: ${missingLabels.join(", ")} after ${maxAttempts * 3}s of waiting. ` +
+        "Either Rakuten changed the page layout, or the numbers took unusually long to load — see RAKUTEN_DEBUG_SCREENSHOTS."
     );
   }
 
   return {
-    salesAmountYen: parseYenOrNumber(salesAmountRaw!),
-    rewardYen: parseYenOrNumber(rewardRaw!),
-    clicks: parseYenOrNumber(clicksRaw!),
-    salesCount: parseYenOrNumber(salesCountRaw!),
+    salesAmountYen: parseYenOrNumber(lastAttempt.values.売上金額!),
+    rewardYen: parseYenOrNumber(lastAttempt.values.成果報酬!),
+    clicks: parseYenOrNumber(lastAttempt.values.クリック数!),
+    salesCount: parseYenOrNumber(lastAttempt.values.売上件数!),
   };
 }
