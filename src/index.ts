@@ -94,25 +94,29 @@ function isJstMoment(config: { date: string; hour: number }): boolean {
   return jstDate === config.date && jstHour === config.hour;
 }
 
-// A/B test (2026-09-27 owner decision, revised twice same day before it ever
-// ran: originally alternate-by-day-parity at 21:00 only; then split into
-// 20:00 [normal cheat-sheet, no config needed] vs. 21:00 [fixed "story"
-// template] for one week; then the owner asked to also pin the product to a
-// single one for the whole window, so only the post *type* is being tested —
-// letting the product vary too would confound the comparison). Unlike
-// oneTimeText/oneTimeOwnImage (scoped to one specific date+hour, used once),
-// this recurs on every day in [startDate, endDate] (inclusive, JST calendar
-// dates) for as long as it's configured, then stops matching on its own —
-// no cleanup needed to end the test after the week. `productId` overrides
-// the normal rotation for this one slot only — the other 4 daily slots keep
-// alternating normally, unaffected.
+// A/B test (2026-09-27 owner decision, revised several times same day before
+// it ever ran: originally alternate-by-day-parity at 21:00 only; then split
+// into 20:00 [normal cheat-sheet, no config needed] vs. 21:00 [fixed "story"
+// template] for one week; then pinned to a single product for the whole
+// window so only the post *type* is being tested, not the product too; then
+// the owner asked for 7 distinct day-by-day wordings instead of repeating the
+// exact same post all week, worried that would look stale to followers
+// checking daily — each keeps the same proven structure/tone, only the
+// opening situation and the closing feeling-word differ). `productId`
+// overrides the normal rotation for this one slot only — the other 4 daily
+// slots keep alternating normally, unaffected. `images` (2+ = carousel) is
+// shared across every day in the window; only the wording varies by date.
+interface RecurringStoryVariant {
+  date: string; // JST calendar date, YYYY-MM-DD — the one day this wording is used
+  hook: string;
+  body: string;
+}
 interface RecurringStorySlotConfig {
   hour: number;
   startDate: string; // JST calendar date, YYYY-MM-DD, inclusive
   endDate: string; // JST calendar date, YYYY-MM-DD, inclusive
   productId: string; // fixed product for every post in this window (overrides pickNextProduct)
-  hook: string;
-  body: string;
+  variants: RecurringStoryVariant[]; // one entry per date in [startDate, endDate]
   // File name(s) inside images/ to attach, in order (2+ = carousel).
   images?: string[];
 }
@@ -124,6 +128,18 @@ function isRecurringStoryMoment(config: RecurringStorySlotConfig): boolean {
   if (jstHour !== config.hour) return false;
   const jstDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(now);
   return jstDate >= config.startDate && jstDate <= config.endDate;
+}
+// Today's specific wording within the window. Separate from
+// isRecurringStoryMoment (which only checks the hour/date range) so a missing
+// variant for today is its own clear error rather than silently falling
+// through to AI generation, which would defeat the point of the test.
+function todaysRecurringStoryVariant(config: RecurringStorySlotConfig): RecurringStoryVariant {
+  const jstDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(new Date());
+  const variant = config.variants.find((v) => v.date === jstDate);
+  if (!variant) {
+    throw new Error(`recurringStorySlot has no variant for today (${jstDate}). Add one to data/research-settings.json.`);
+  }
+  return variant;
 }
 
 // Each override is a list so more than one specific post (e.g. today's 20:00
@@ -292,7 +308,7 @@ async function main(): Promise<void> {
   // oneTimeText (2026-09-25 owner decision) lets the owner fix the exact hook
   // and body for one specific post — e.g. to match a reference post's tone —
   // instead of the usual AI generation, during its configured JST window only.
-  const recurringStory = isStoryMoment ? { hook: recurringStoryConfig!.hook, body: recurringStoryConfig!.body } : undefined;
+  const recurringStory = isStoryMoment ? todaysRecurringStoryVariant(recurringStoryConfig!) : undefined;
   const { hook, body } = oneTimeText ?? recurringStory ?? (await generatePostText(product, styleExamples, slot));
 
   // A one-time override (oneTimeText and/or oneTimeOwnImage matching this
