@@ -49,10 +49,21 @@ async function graphGet(path: string, params: Record<string, string>): Promise<a
 async function waitForContainerFinished(containerId: string): Promise<void> {
   const maxAttempts = 20; // 20 x 3s = up to 60s, generous for an image download+validate.
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const status = await graphGet(containerId, { fields: "status,status_code" });
-    if (status.status_code === "FINISHED") return;
-    if (status.status_code === "ERROR" || status.status_code === "EXPIRED") {
-      throw new Error(`Container ${containerId} failed to process: status_code=${status.status_code}`);
+    // The Threads API's field for this is `status` (values: IN_PROGRESS,
+    // FINISHED, ERROR, EXPIRED, PUBLISHED) plus `error_message` on failure.
+    // An earlier version of this function queried `status_code`, which does
+    // not exist on this API (that name is from Instagram's similarly-shaped
+    // container status field, not Threads') and made every post fail with
+    // "Tried accessing nonexisting field (status_code)" -- caught after it
+    // broke 2026-09-27's 8:00 post (fixed same day).
+    const result = await graphGet(containerId, { fields: "status,error_message" });
+    if (result.status === "FINISHED") return;
+    if (result.status === "ERROR" || result.status === "EXPIRED") {
+      throw new Error(
+        `Container ${containerId} failed to process: status=${result.status}${
+          result.error_message ? ` (${result.error_message})` : ""
+        }`
+      );
     }
     await sleep(3000);
   }
