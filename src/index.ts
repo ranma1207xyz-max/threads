@@ -94,12 +94,15 @@ function isJstMoment(config: { date: string; hour: number }): boolean {
   return jstDate === config.date && jstHour === config.hour;
 }
 
-// A/B test (2026-09-27 owner decision): the 21:00 slot alternates by JST
-// calendar day between the normal automatic style (odd days) and a fixed
-// "story" template per product (even days), to compare them head-to-head at
-// the same time of day rather than across different hours. Unlike
+// A/B test (2026-09-27 owner decision, revised same day: originally an
+// alternate-by-day-parity design at 21:00 only, changed before it ever ran to
+// a fixed split between the 20:00 slot — left as the normal automatic
+// cheat-sheet style, no config needed — and 21:00, which uses a fixed "story"
+// template per product every day within a one-week window only). Unlike
 // oneTimeText/oneTimeOwnImage (scoped to one specific date+hour, used once),
-// this recurs on every matching day for as long as it's configured.
+// this recurs on every day in [startDate, endDate] (inclusive, JST calendar
+// dates) for as long as it's configured, then stops matching on its own —
+// no cleanup needed to end the test after the week.
 interface RecurringStoryTemplate {
   hook: string;
   body: string;
@@ -111,7 +114,8 @@ interface RecurringStoryTemplate {
 }
 interface RecurringStorySlotConfig {
   hour: number;
-  dayParity: "even" | "odd";
+  startDate: string; // JST calendar date, YYYY-MM-DD, inclusive
+  endDate: string; // JST calendar date, YYYY-MM-DD, inclusive
   templates: Record<string, RecurringStoryTemplate>; // keyed by product id
 }
 function isRecurringStoryMoment(config: RecurringStorySlotConfig): boolean {
@@ -120,8 +124,8 @@ function isRecurringStoryMoment(config: RecurringStorySlotConfig): boolean {
     new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", hour: "numeric", hourCycle: "h23" }).format(now)
   );
   if (jstHour !== config.hour) return false;
-  const jstDay = Number(new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", day: "numeric" }).format(now));
-  return config.dayParity === "even" ? jstDay % 2 === 0 : jstDay % 2 === 1;
+  const jstDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(now);
+  return jstDate >= config.startDate && jstDate <= config.endDate;
 }
 
 // Each override is a list so more than one specific post (e.g. today's 20:00
