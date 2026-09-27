@@ -94,29 +94,27 @@ function isJstMoment(config: { date: string; hour: number }): boolean {
   return jstDate === config.date && jstHour === config.hour;
 }
 
-// A/B test (2026-09-27 owner decision, revised same day: originally an
-// alternate-by-day-parity design at 21:00 only, changed before it ever ran to
-// a fixed split between the 20:00 slot — left as the normal automatic
-// cheat-sheet style, no config needed — and 21:00, which uses a fixed "story"
-// template per product every day within a one-week window only). Unlike
+// A/B test (2026-09-27 owner decision, revised twice same day before it ever
+// ran: originally alternate-by-day-parity at 21:00 only; then split into
+// 20:00 [normal cheat-sheet, no config needed] vs. 21:00 [fixed "story"
+// template] for one week; then the owner asked to also pin the product to a
+// single one for the whole window, so only the post *type* is being tested —
+// letting the product vary too would confound the comparison). Unlike
 // oneTimeText/oneTimeOwnImage (scoped to one specific date+hour, used once),
 // this recurs on every day in [startDate, endDate] (inclusive, JST calendar
 // dates) for as long as it's configured, then stops matching on its own —
-// no cleanup needed to end the test after the week.
-interface RecurringStoryTemplate {
-  hook: string;
-  body: string;
-  // File name(s) inside images/ to attach, in order. Empty/absent means no
-  // owner photo exists yet for this product — the post still goes out
-  // (falling back to the usual trend/product image), it just isn't the
-  // "photo" half of the "photo+story" test for that product yet.
-  images?: string[];
-}
+// no cleanup needed to end the test after the week. `productId` overrides
+// the normal rotation for this one slot only — the other 4 daily slots keep
+// alternating normally, unaffected.
 interface RecurringStorySlotConfig {
   hour: number;
   startDate: string; // JST calendar date, YYYY-MM-DD, inclusive
   endDate: string; // JST calendar date, YYYY-MM-DD, inclusive
-  templates: Record<string, RecurringStoryTemplate>; // keyed by product id
+  productId: string; // fixed product for every post in this window (overrides pickNextProduct)
+  hook: string;
+  body: string;
+  // File name(s) inside images/ to attach, in order (2+ = carousel).
+  images?: string[];
 }
 function isRecurringStoryMoment(config: RecurringStorySlotConfig): boolean {
   const now = new Date();
@@ -264,7 +262,21 @@ async function main(): Promise<void> {
     return;
   }
 
-  const product = pickNextProduct(products, log);
+  // The recurring A/B story slot (2026-09-27 owner decision) fixes the
+  // product for its whole window, overriding the normal rotation for this
+  // run only — so the test compares just the post *type*, not the product
+  // too. Checked before the normal pick so that override can actually apply.
+  const oneTimeText = findJstMoment(researchSettings.oneTimeText);
+  const recurringStoryConfig = researchSettings.recurringStorySlot;
+  const isStoryMoment = !oneTimeText && Boolean(recurringStoryConfig) && isRecurringStoryMoment(recurringStoryConfig!);
+  const product = isStoryMoment
+    ? products.find((p) => p.id === recurringStoryConfig!.productId) ??
+      (() => {
+        throw new Error(
+          `recurringStorySlot.productId "${recurringStoryConfig!.productId}" not found in data/products.json.`
+        );
+      })()
+    : pickNextProduct(products, log);
 
   // The affiliate link must never end up in the new post itself — it is only
   // ever posted as a reply (STEP 3 below). Fail fast if a product has no
@@ -280,15 +292,7 @@ async function main(): Promise<void> {
   // oneTimeText (2026-09-25 owner decision) lets the owner fix the exact hook
   // and body for one specific post — e.g. to match a reference post's tone —
   // instead of the usual AI generation, during its configured JST window only.
-  const oneTimeText = findJstMoment(researchSettings.oneTimeText);
-  // The recurring A/B story slot (see isRecurringStoryMoment above) is looked
-  // up by the product this run already picked, and only wins when there's no
-  // one-off oneTimeText scheduled for this exact moment (that always takes
-  // priority, being the more specific, deliberately single-use override).
-  const recurringStory =
-    !oneTimeText && researchSettings.recurringStorySlot && isRecurringStoryMoment(researchSettings.recurringStorySlot)
-      ? researchSettings.recurringStorySlot.templates[product.id]
-      : undefined;
+  const recurringStory = isStoryMoment ? { hook: recurringStoryConfig!.hook, body: recurringStoryConfig!.body } : undefined;
   const { hook, body } = oneTimeText ?? recurringStory ?? (await generatePostText(product, styleExamples, slot));
 
   // A one-time override (oneTimeText and/or oneTimeOwnImage matching this
@@ -303,10 +307,10 @@ async function main(): Promise<void> {
   const oneTimeOwnImageConfig = findJstMoment(researchSettings.oneTimeOwnImage);
   const ownImageConfig: OwnImageConfig | undefined =
     oneTimeOwnImageConfig ??
-    (recurringStory?.images && recurringStory.images.length > 0
-      ? { date: "", hour: 0, files: recurringStory.images }
+    (isStoryMoment && recurringStoryConfig!.images && recurringStoryConfig!.images.length > 0
+      ? { date: "", hour: 0, files: recurringStoryConfig!.images }
       : undefined);
-  const isOneTimeOverrideMoment = Boolean(oneTimeText) || Boolean(oneTimeOwnImageConfig) || Boolean(recurringStory);
+  const isOneTimeOverrideMoment = Boolean(oneTimeText) || Boolean(oneTimeOwnImageConfig) || isStoryMoment;
 
   // Prefer a photo from one of this run's trending-post examples (adds
   // variety and matches what's currently resonating) over the product's own
