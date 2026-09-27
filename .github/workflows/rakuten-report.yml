@@ -1,0 +1,53 @@
+name: Rakuten Affiliate report
+
+on:
+  schedule:
+    # 23:50 JST (UTC+9) -> 14:50 UTC. Once a day, near the end of the day, so
+    # the recorded numbers are as close as possible to a full day's activity
+    # (the mypage always shows month-to-date totals, not a single day).
+    - cron: "50 14 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - run: npm install
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Restore logged-in Rakuten Affiliate session
+        run: |
+          mkdir -p data
+          echo "${{ secrets.RAKUTEN_SESSION_STATE_B64 }}" | base64 -d > data/rakuten-session.json
+
+      - name: Fetch this month's summary
+        run: npm run rakuten:report
+        env:
+          RAKUTEN_DEBUG_SCREENSHOTS: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
+
+      - name: Upload debug screenshot on failure
+        if: failure() && github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rakuten-debug-screenshot
+          path: debug/
+          if-no-files-found: ignore
+
+      - name: Commit updated rakuten-report-log.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/rakuten-report-log.json
+          git diff --cached --quiet || git commit -m "chore: update rakuten-report-log.json [skip ci]"
+          git push

@@ -54,6 +54,16 @@ Threads公式APIには、他人の投稿の「いいね数」や「返信欄の�
 - **注意(画像・著作権リスク、取締役会承認済み)**: `imageUrl` が入った例がある場合、`index.ts` の投稿時にその中からランダムに1枚選び、**他人の投稿の画像をそのままURLで参照(ホットリンク)して自社の投稿に使用する**(2026-09-17 オーナー承認。文章とは異なりAI生成による代替ではなく、他人が撮影・作成した画像をそのまま利用する方式であり、著作権侵害のリスクがあることを理解した上での意思決定。詳細は `経営企画/事業計画.md` 参照)。該当する例が無い場合、または画像URLがすでに失効している場合は `products.json` の `imageUrl` にフォールバックする。
 - `data/affiliate-domains.json` に登録されている提携先(ASP)ドメインは随時見直す(新しいASPと提携したら追加する)。
 
+## 楽天アフィリエイトの売上・成果の自動記録(2026-09-27、オーナー承認)
+
+楽天アフィリエイトには、自分の成果(売上・報酬額など)を外部から取得できる公式API が無いため、Threadsの自動リサーチと同じ**ブラウザ自動操作(Playwright)でログイン済みのマイページを開いて読み取る方式**にしている。
+
+- 実行: `npm run rakuten:report`(GitHub Actionsでは `.github/workflows/rakuten-report.yml` が毎日23:50 JSTに自動実行する)。
+- マイページ(`https://affiliate.rakuten.co.jp/`)の「今月の成果情報」欄にある**売上金額・成果報酬・クリック数・売上件数**(いずれも月初からの累計)を読み取り、`data/rakuten-report-log.json` に取得時刻つきで追記していく(上書きではなく追記。過去分もそのまま残る)。
+- **リスクの認識(オーナー承認済み・2026-09-27)**: これは楽天の想定していない自動アクセスであり、利用規約に抵触してアフィリエイトアカウントが停止されるリスクがある(Threadsの自動巡回より、アカウント停止時の実害=収益の喪失が大きい)。また、金融・収益に関わる画面は認証が厳しくなりがちで、Threadsのセッションより短い間隔で失効する可能性がある。ワークフローが「セッション切れ」で失敗するようになったら、`npm run rakuten:login` をやり直して `RAKUTEN_SESSION_STATE_B64` を更新すること。
+- 数字の抜き出しは、ページのCSS構造ではなく画面上の見出しテキスト(「売上金額」等)を目印にする方式(2026-09-27時点でスクリーンショットしか確認できておらず、実際のHTML構造は未確認のため)。楽天側のページデザイン変更で抜き出しに失敗した場合は例外で止まる(誤った数字を記録しない)。`workflow_dispatch`で手動実行する際は `RAKUTEN_DEBUG_SCREENSHOTS=1` が自動で付き、失敗時にマイページのスクリーンショットがワークフローの成果物として残るので、それを見て`src/rakutenScraper.ts`の読み取り方法を調整する。
+- `経理/収支記録.md`(このリポジトリの外、会社フォルダ側)への反映は自動ではしない。ほにょが`data/rakuten-report-log.json`の最新値を見て、手動で収支記録に転記・整理する運用(会計の数字は自動で書き換えず、必ず人が確認する)。
+
 ## 商材候補リサーチ(手動実行)
 
 `data/product-research-keywords.json` に登録した悩み別キーワード(例: 「毛穴 美容液 おすすめ」)でThreads公式APIのキーワード検索を行い、実際にユーザーが言及している商品・ブランドを`data/product-research-log.json`に出力する。ASPで商材候補を探す前段の一次リサーチ用。
@@ -85,6 +95,7 @@ Threads公式APIには、他人の投稿の「いいね数」や「返信欄の�
 - `THREADS_USER_ID`
 - `ANTHROPIC_API_KEY`
 - `THREADS_SESSION_STATE_B64` — 伸びている投稿の自動リサーチ(ブラウザ自動操作)用。`npm run research:login` で作った `data/threads-session.json` をbase64化した文字列(詳細は上記「伸びている投稿の自動リサーチ」参照)。
+- `RAKUTEN_SESSION_STATE_B64` — 楽天アフィリエイトの売上・成果の自動記録用。`npm run rakuten:login` で作った `data/rakuten-session.json` をbase64化した文字列(詳細は上記「楽天アフィリエイトの売上・成果の自動記録」参照)。
 
 ### 4. データの準備
 
@@ -116,6 +127,7 @@ npm run post           # 実際にThreadsへ投稿する
   - 以前の型(悩み共感+使い方 `morning`・買いません型 `decisive`・手順型 `steps`・質問だけ `question`)はコードに残してあるが、今は時間割に入れていない。`SLOT_BY_JST_HOUR` を書き換えれば戻せる(質問だけの投稿は商品・リンク・広告表示なし、`productId: "engagement-question"` で記録)。
   - それ以外の時刻(手動実行など)は型を指定しない。ドライランでは `npm run post:dry -- --slot=<morning|cheatsheet|decisive|question|steps|feed>` で型を指定できる。
 - `.github/workflows/insights.yml` が毎日22:30 JSTに閲覧数などを自動記録する。
+- `.github/workflows/rakuten-report.yml` が毎日23:50 JSTに楽天アフィリエイトの売上・成果情報を自動記録する。
 
 頻度はどれもcron式を編集して調整可能。GitHub Actionsの画面から手動実行(`workflow_dispatch`)もでき、投稿ワークフローでは `dry_run: true` を指定すると投稿せず生成だけ確認できる。
 
@@ -140,20 +152,26 @@ threads-auto-post/
     posted-log.json         # 投稿履歴(自動更新、重複防止用)
     insights-log.json       # 閲覧数などのスナップショット履歴(自動更新)
     threads-session.json    # ブラウザ自動操作用のログイン済みセッション(gitignore対象・要ローカル生成)
+    rakuten-session.json    # 楽天アフィリエイト用のログイン済みセッション(gitignore対象・要ローカル生成)
+    rakuten-report-log.json # 楽天アフィリエイトの売上・成果情報のスナップショット履歴(自動更新)
   src/
     config.ts              # 環境変数の読み込み
     threadsClient.ts        # Threads公式Graph API連携(新規投稿・自己返信・インサイト取得)
     threadsResearch.ts      # Threads公式Graph API連携(キーワード検索。商材候補リサーチ専用)
     threadsScraper.ts       # ブラウザ自動操作(Playwright)によるThreads巡回・条件判定
     threadsLogin.ts         # ブラウザ自動操作用ログインセッションの作成スクリプト
+    rakutenScraper.ts        # ブラウザ自動操作(Playwright)による楽天アフィリエイトのマイページ読み取り
+    rakutenLogin.ts          # 楽天アフィリエイト用ログインセッションの作成スクリプト
     contentGenerator.ts     # Claude APIで投稿文を生成
     runResearch.ts          # 伸びている投稿の自動リサーチのエントリスクリプト
+    runRakutenReport.ts      # 楽天アフィリエイトの売上・成果情報の自動記録のエントリスクリプト
     index.ts                # 投稿のエントリスクリプト
     collectInsights.ts      # 閲覧数などの自動記録のエントリスクリプト
   .github/workflows/
-    research.yml   # 自動リサーチのスケジュール実行(ブラウザ自動操作)
-    post.yml       # 投稿のスケジュール実行
-    insights.yml   # 閲覧数などの自動記録のスケジュール実行
+    research.yml        # 自動リサーチのスケジュール実行(ブラウザ自動操作)
+    post.yml            # 投稿のスケジュール実行
+    insights.yml        # 閲覧数などの自動記録のスケジュール実行
+    rakuten-report.yml  # 楽天アフィリエイトの売上・成果情報の自動記録のスケジュール実行
 ```
 
 ## 他ジャンルの「型だけ」参考(2026-09-19)

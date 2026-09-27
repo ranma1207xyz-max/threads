@@ -3,6 +3,7 @@ dist/
 .env
 *.log
 data/threads-session.json
+data/rakuten-session.json
 
 # Local dry-run previews of the cheat-sheet card (hosted cards under cards/card-* are committed by CI)
 cards/preview-*

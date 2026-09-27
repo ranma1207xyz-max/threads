@@ -9,7 +9,9 @@
     "research": "tsx src/runResearch.ts",
     "research:login": "tsx src/threadsLogin.ts",
     "research:products": "tsx src/productResearch.ts",
-    "insights": "tsx src/collectInsights.ts"
+    "insights": "tsx src/collectInsights.ts",
+    "rakuten:login": "tsx src/rakutenLogin.ts",
+    "rakuten:report": "tsx src/runRakutenReport.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
