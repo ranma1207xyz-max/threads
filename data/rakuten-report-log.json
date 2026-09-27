@@ -5,5 +5,12 @@
     "clicks": 678,
     "salesCount": 8,
     "capturedAt": "2026-09-27T09:29:22.296Z"
+  },
+  {
+    "salesAmountYen": 40605,
+    "rewardYen": 1529,
+    "clicks": 687,
+    "salesCount": 8,
+    "capturedAt": "2026-09-27T14:55:47.777Z"
   }
 ]
