@@ -94,6 +94,36 @@ function isJstMoment(config: { date: string; hour: number }): boolean {
   return jstDate === config.date && jstHour === config.hour;
 }
 
+// A/B test (2026-09-27 owner decision): the 21:00 slot alternates by JST
+// calendar day between the normal automatic style (odd days) and a fixed
+// "story" template per product (even days), to compare them head-to-head at
+// the same time of day rather than across different hours. Unlike
+// oneTimeText/oneTimeOwnImage (scoped to one specific date+hour, used once),
+// this recurs on every matching day for as long as it's configured.
+interface RecurringStoryTemplate {
+  hook: string;
+  body: string;
+  // File name(s) inside images/ to attach, in order. Empty/absent means no
+  // owner photo exists yet for this product — the post still goes out
+  // (falling back to the usual trend/product image), it just isn't the
+  // "photo" half of the "photo+story" test for that product yet.
+  images?: string[];
+}
+interface RecurringStorySlotConfig {
+  hour: number;
+  dayParity: "even" | "odd";
+  templates: Record<string, RecurringStoryTemplate>; // keyed by product id
+}
+function isRecurringStoryMoment(config: RecurringStorySlotConfig): boolean {
+  const now = new Date();
+  const jstHour = Number(
+    new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", hour: "numeric", hourCycle: "h23" }).format(now)
+  );
+  if (jstHour !== config.hour) return false;
+  const jstDay = Number(new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", day: "numeric" }).format(now));
+  return config.dayParity === "even" ? jstDay % 2 === 0 : jstDay % 2 === 1;
+}
+
 // Each override is a list so more than one specific post (e.g. today's 20:00
 // AND 21:00) can each have their own one-time setup at the same time, without
 // one overwriting the other. Returns the entry whose date+hour matches right
@@ -212,6 +242,7 @@ async function main(): Promise<void> {
     // posted-log entry uses `productId` instead of the rotated product's id,
     // so it never gets mixed into the normal rotation's own history.
     oneTimeText?: { date: string; hour: number; hook: string; body: string; url?: string; productId?: string }[];
+    recurringStorySlot?: RecurringStorySlotConfig;
   }>(RESEARCH_SETTINGS_PATH);
   const styleExamples = readJson<StyleExample[]>(STYLE_EXAMPLES_PATH).filter(
     (example) => example.genre !== "other" || researchSettings.includeOtherGenreStyles
@@ -246,7 +277,15 @@ async function main(): Promise<void> {
   // and body for one specific post — e.g. to match a reference post's tone —
   // instead of the usual AI generation, during its configured JST window only.
   const oneTimeText = findJstMoment(researchSettings.oneTimeText);
-  const { hook, body } = oneTimeText ?? (await generatePostText(product, styleExamples, slot));
+  // The recurring A/B story slot (see isRecurringStoryMoment above) is looked
+  // up by the product this run already picked, and only wins when there's no
+  // one-off oneTimeText scheduled for this exact moment (that always takes
+  // priority, being the more specific, deliberately single-use override).
+  const recurringStory =
+    !oneTimeText && researchSettings.recurringStorySlot && isRecurringStoryMoment(researchSettings.recurringStorySlot)
+      ? researchSettings.recurringStorySlot.templates[product.id]
+      : undefined;
+  const { hook, body } = oneTimeText ?? recurringStory ?? (await generatePostText(product, styleExamples, slot));
 
   // A one-time override (oneTimeText and/or oneTimeOwnImage matching this
   // exact date/hour) replaces the slot's usual content for this one post —
@@ -255,9 +294,15 @@ async function main(): Promise<void> {
   // (2026-09-26 owner decision) silently broke oneTimeOwnImage: it only ever
   // applied to non-cheatsheet slots, so a one-off image+story post like
   // 9/25's would attach no image at all once every hour became cheatsheet
-  // (bug found 2026-09-27, ahead of trying this style again).
-  const ownImageConfig = findJstMoment(researchSettings.oneTimeOwnImage);
-  const isOneTimeOverrideMoment = Boolean(oneTimeText) || Boolean(ownImageConfig);
+  // (bug found 2026-09-27, ahead of trying this style again). The recurring
+  // story slot needs the exact same override for the exact same reason.
+  const oneTimeOwnImageConfig = findJstMoment(researchSettings.oneTimeOwnImage);
+  const ownImageConfig: OwnImageConfig | undefined =
+    oneTimeOwnImageConfig ??
+    (recurringStory?.images && recurringStory.images.length > 0
+      ? { date: "", hour: 0, files: recurringStory.images }
+      : undefined);
+  const isOneTimeOverrideMoment = Boolean(oneTimeText) || Boolean(oneTimeOwnImageConfig) || Boolean(recurringStory);
 
   // Prefer a photo from one of this run's trending-post examples (adds
   // variety and matches what's currently resonating) over the product's own
