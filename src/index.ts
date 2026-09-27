@@ -260,7 +260,10 @@ async function main(): Promise<void> {
     // posted-log entry uses `productId` instead of the rotated product's id,
     // so it never gets mixed into the normal rotation's own history.
     oneTimeText?: { date: string; hour: number; hook: string; body: string; url?: string; productId?: string }[];
-    recurringStorySlot?: RecurringStorySlotConfig;
+    // A list (2026-09-27 owner decision) so more than one hour can each run
+    // its own fixed A/B arm at the same time — e.g. 20:00's cheat-sheet arm
+    // and 21:00's photo+story arm for the same test week.
+    recurringStorySlots?: RecurringStorySlotConfig[];
   }>(RESEARCH_SETTINGS_PATH);
   const styleExamples = readJson<StyleExample[]>(STYLE_EXAMPLES_PATH).filter(
     (example) => example.genre !== "other" || researchSettings.includeOtherGenreStyles
@@ -283,13 +286,15 @@ async function main(): Promise<void> {
   // run only — so the test compares just the post *type*, not the product
   // too. Checked before the normal pick so that override can actually apply.
   const oneTimeText = findJstMoment(researchSettings.oneTimeText);
-  const recurringStoryConfig = researchSettings.recurringStorySlot;
-  const isStoryMoment = !oneTimeText && Boolean(recurringStoryConfig) && isRecurringStoryMoment(recurringStoryConfig!);
+  const recurringStoryConfig = oneTimeText
+    ? undefined
+    : researchSettings.recurringStorySlots?.find(isRecurringStoryMoment);
+  const isStoryMoment = Boolean(recurringStoryConfig);
   const product = isStoryMoment
     ? products.find((p) => p.id === recurringStoryConfig!.productId) ??
       (() => {
         throw new Error(
-          `recurringStorySlot.productId "${recurringStoryConfig!.productId}" not found in data/products.json.`
+          `recurringStorySlots: productId "${recurringStoryConfig!.productId}" not found in data/products.json.`
         );
       })()
     : pickNextProduct(products, log);
