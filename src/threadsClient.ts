@@ -21,6 +21,36 @@ async function graphPost(path: string, params: Record<string, string>): Promise<
   return body;
 }
 
+// error_subcode 4279009 ("Media Not Found") is a known Threads-side race
+// condition, not a real problem with the container: threads_publish can
+// 400 for a few seconds even after the container's own status already
+// reports FINISHED, because the publish step hasn't caught up with it yet
+// internally. waitForContainerFinished alone wasn't enough to prevent this
+// — confirmed 2026-09-27, when it hit the 21:00 carousel post: the publish
+// failed this way, the code's existing fallback silently retried as a
+// text-only post (no image at all), and the owner had to point out the
+// missing image before this was noticed. Retrying the publish itself a few
+// times fixes it (same approach other Threads client libraries use for
+// this exact error code).
+function isMediaNotReadyError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('"error_subcode":4279009');
+}
+
+async function publishWithRetry(creationId: string): Promise<any> {
+  const maxAttempts = 5;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await graphPost(`${config.threadsUserId}/threads_publish`, { creation_id: creationId });
+    } catch (error) {
+      if (!isMediaNotReadyError(error) || attempt === maxAttempts) throw error;
+      console.warn(`threads_publish reported "Media Not Found" (attempt ${attempt}/${maxAttempts}), retrying...`);
+      await sleep(3000);
+    }
+  }
+  // Unreachable (the loop above always returns or throws), but keeps TypeScript happy.
+  throw new Error("publishWithRetry: exhausted attempts without returning or throwing.");
+}
+
 async function graphGet(path: string, params: Record<string, string>): Promise<any> {
   const url = new URL(`${API_BASE}/${path}`);
   for (const [key, value] of Object.entries(params)) {
@@ -75,9 +105,7 @@ async function createAndPublishContainer(containerParams: Record<string, string>
 
   await waitForContainerFinished(container.id);
 
-  const published = await graphPost(`${config.threadsUserId}/threads_publish`, {
-    creation_id: container.id,
-  });
+  const published = await publishWithRetry(container.id);
 
   return published.id;
 }

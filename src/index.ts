@@ -417,6 +417,16 @@ async function main(): Promise<void> {
   // STEP 1: post the hook as a new top-level post. A carousel (2+ owner
   // images) uses its own dedicated posting call; everything else is the
   // existing single-image-or-text path.
+  // Tracks whether the fallback path below actually ran, so the posted-log
+  // entry can reflect what was truly posted rather than what was merely
+  // attempted — previously ownImageFiles was recorded whenever ownImages was
+  // set, even on a run that fell back to postToThreads(hook, product.imageUrl)
+  // (or, with no product.imageUrl configured, a plain text-only post) after
+  // the attached-image attempt failed. That made the log claim an image was
+  // used on posts that went out with none (caught 2026-09-27, when the
+  // owner noticed the 21:00 carousel post had no photo despite the log —
+  // and code — saying otherwise).
+  let usedFallbackImage = false;
   let threadsPostId: string;
   try {
     threadsPostId =
@@ -430,6 +440,7 @@ async function main(): Promise<void> {
           error instanceof Error ? error.message : error
         }`
       );
+      usedFallbackImage = true;
       threadsPostId = await postToThreads(hook, product.imageUrl);
     } else {
       throw error;
@@ -457,7 +468,7 @@ async function main(): Promise<void> {
     postedAt: new Date().toISOString(),
     threadsPostId,
     threadsReplyId,
-    ...(ownImages ? { ownImageFiles: ownImages.files } : {}),
+    ...(ownImages && !usedFallbackImage ? { ownImageFiles: ownImages.files } : {}),
   });
   writeFileSync(POSTED_LOG_PATH, JSON.stringify(log, null, 2) + "\n");
 }
