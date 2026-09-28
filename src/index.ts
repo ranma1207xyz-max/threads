@@ -44,7 +44,7 @@ const SLOT_BY_JST_HOUR: Record<number, Slot> = {
   20: "cheatsheet",
   21: "cheatsheet",
 };
-const KNOWN_SLOTS = new Set<string>(["morning", "cheatsheet", "decisive", "question", "steps", "feed"]);
+const KNOWN_SLOTS = new Set<string>(["morning", "cheatsheet", "decisive", "question", "steps", "feed", "clone"]);
 
 // Which post shape to use, decided by the Japan-time hour the run happens in
 // (2026-09-19 owner decision: split the evening posts by type so they don't
@@ -148,6 +148,27 @@ function todaysRecurringStoryVariant(config: RecurringStorySlotConfig): Recurrin
 // now, if any — normally at most one ever matches.
 function findJstMoment<T extends { date: string; hour: number }>(entries?: T[]): T | undefined {
   return entries?.find(isJstMoment);
+}
+
+// One week's trial (2026-09-28 owner decision) of the "clone" style (see
+// contentGenerator.ts) at specific hours, without touching SLOT_BY_JST_HOUR's
+// normal cheatsheet mapping directly — the window closing on its own (like
+// recurringStorySlots) needs no cleanup step. Scoped to hours *not* already
+// claimed by recurringStorySlots' 20:00/21:00 A/B test running the same week,
+// so the two experiments don't collide.
+interface CloneStyleWindowConfig {
+  startDate: string; // JST calendar date, YYYY-MM-DD, inclusive
+  endDate: string; // JST calendar date, YYYY-MM-DD, inclusive
+  hours: number[];
+}
+function isCloneStyleMoment(config: CloneStyleWindowConfig): boolean {
+  const now = new Date();
+  const jstHour = Number(
+    new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", hour: "numeric", hourCycle: "h23" }).format(now)
+  );
+  if (!config.hours.includes(jstHour)) return false;
+  const jstDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(now);
+  return jstDate >= config.startDate && jstDate <= config.endDate;
 }
 
 interface OwnImageConfig {
@@ -264,6 +285,7 @@ async function main(): Promise<void> {
     // its own fixed A/B arm at the same time — e.g. 20:00's cheat-sheet arm
     // and 21:00's photo+story arm for the same test week.
     recurringStorySlots?: RecurringStorySlotConfig[];
+    cloneStyleWindow?: CloneStyleWindowConfig;
   }>(RESEARCH_SETTINGS_PATH);
   const styleExamples = readJson<StyleExample[]>(STYLE_EXAMPLES_PATH).filter(
     (example) => example.genre !== "other" || researchSettings.includeOtherGenreStyles
@@ -274,7 +296,17 @@ async function main(): Promise<void> {
     throw new Error("data/products.json is empty. Add at least one product.");
   }
 
-  const slot = pickSlot();
+  // The clone-style window (see isCloneStyleMoment above) overrides
+  // SLOT_BY_JST_HOUR's normal mapping for its specific hours only, without a
+  // --slot= override and without touching a moment already claimed by
+  // recurringStorySlots below.
+  const rawSlot = pickSlot();
+  const slot: Slot | undefined =
+    !process.argv.some((arg) => arg.startsWith("--slot=")) &&
+    researchSettings.cloneStyleWindow &&
+    isCloneStyleMoment(researchSettings.cloneStyleWindow)
+      ? "clone"
+      : rawSlot;
   console.log(`Post slot: ${slot ?? "(none - no forced style)"}`);
   if (slot === "question") {
     await runQuestionPost(dryRun, log);
@@ -314,7 +346,15 @@ async function main(): Promise<void> {
   // and body for one specific post — e.g. to match a reference post's tone —
   // instead of the usual AI generation, during its configured JST window only.
   const recurringStory = isStoryMoment ? todaysRecurringStoryVariant(recurringStoryConfig!) : undefined;
-  const { hook, body } = oneTimeText ?? recurringStory ?? (await generatePostText(product, styleExamples, slot));
+  const generated = oneTimeText ?? recurringStory ?? (await generatePostText(product, styleExamples, slot));
+  const { hook, body } = generated;
+  // Only ever set for style "clone" (2026-09-28 owner decision, one week's
+  // trial): the same trending post's own photo, paired with hook/body text
+  // that closely mirrors that post's actual wording rather than just its
+  // structure — see contentGenerator.ts's STYLE_INSTRUCTIONS.clone for the
+  // risk this accepts (much closer to a straight copy than "feed" style,
+  // which only borrows structure and writes new wording).
+  const cloneImageUrl = "cloneImageUrl" in generated ? generated.cloneImageUrl : undefined;
 
   // A one-time override (oneTimeText and/or oneTimeOwnImage matching this
   // exact date/hour) replaces the slot's usual content for this one post —
@@ -367,7 +407,7 @@ async function main(): Promise<void> {
     (slot === "cheatsheet" && !isOneTimeOverrideMoment) || cardUrl || !ownImageConfig
       ? undefined
       : pickOwnImages(log, ownImageConfig);
-  const trendImageUrl = cardUrl || ownImages ? undefined : pickTrendImageUrl(styleExamples);
+  const trendImageUrl = cardUrl || ownImages ? undefined : cloneImageUrl ?? pickTrendImageUrl(styleExamples);
   // attachedImageUrls may hold more than one URL only for an owner-supplied
   // carousel (see OwnImageConfig.files above); every other source is a single
   // image. `imageUrl` (its first/only entry) is what the single-image posting

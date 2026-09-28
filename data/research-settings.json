@@ -2,6 +2,12 @@
   "includeOtherGenreStyles": true,
   "attachCheatsheetCard": false,
   "maxOtherGenreExamples": 4,
+  "cloneStyleWindow": {
+    "startDate": "2026-09-28",
+    "endDate": "2026-10-04",
+    "hours": [8, 18, 19],
+    "_comment": "2026-09-28 オーナー決定・1週間だけの試し: 伸びている投稿の文章・画像をほぼそのまま使う「clone」型を、8時・18時・19時に適用する(20時・21時は別のA/Bテストで10/3まで使用中のため対象外)。文章そのものをほぼコピーするため、通常の「型だけ参考にする」方式より著作権・炎上リスクが高いことをオーナーに説明済みで、リスクを理解した上での1週間の試験導入。期間が終われば自動的にいつもの早見表型に戻る。"
+  },
   "oneTimeOwnImage": [
     {
       "date": "2026-09-25",

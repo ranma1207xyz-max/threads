@@ -34,6 +34,11 @@ export interface StyleExample {
 export interface GeneratedPost {
   hook: string;
   body: string;
+  // Set only for "clone" style: the same trending example's own photo, so
+  // index.ts can attach it instead of independently picking a random trend
+  // image (the whole point of "clone" is reusing one post's image+text
+  // together, not mixing one post's wording with a different post's photo).
+  cloneImageUrl?: string;
 }
 
 // The body shares a single Threads post (the reply) with the affiliate link
@@ -66,7 +71,7 @@ const SYSTEM_PROMPT = `あなたはThreads(Meta)向けの日本語アフィリ�
 - 「早見表」型のフック(2026-09-19、オーナーが指定した伸びている投稿の型): 冒頭で「美容頑張る人を応援したい」といった姿勢を一言示し、「悩み→成分」を一行ずつ並べた早見表(例: 「毛穴には◯◯」「乾燥には◯◯」)を見せる。最後に「この表のうち◯つが、この1本(1セット)で埋まる」と匂わせ、「それは、」のような引きで終えて、答え(商品)を返信欄に回す。本文(返信)では、成分名と使用感を短く具体的に伝える。
 
 厳守事項:
-- 参考として渡される「伸びている投稿の例」は、上記の"型"の参考にするだけで、文章そのものを一切コピーしないこと。必ず新規に書き起こすこと。
+- 参考として渡される「伸びている投稿の例」は、上記の"型"の参考にするだけで、文章そのものを一切コピーしないこと。必ず新規に書き起こすこと。(例外: 今回の型が「clone」の場合のみ、指示に従って「今回お手本にする1件」の文章をほぼそのまま使ってよい。)
 - フックは${HOOK_MAX_LENGTH}文字以内。商品名や具体的な商品説明にはまだ踏み込まず、読者の関心・悩みに寄り添う一文〜数文にとどめること。文末に「続きはリプ欄で」「それは、」のように、答えや本文が返信にあることが伝わる引きを入れること(表現は毎回変えてよい)。早見表型のときだけ、この文字数を上限いっぱいまで使ってよい。
 - 早見表型を使うときの決まり: 表に並べる悩みと成分の組み合わせ・順番・項目数は毎回変え、参考例の表をそのまま写さないこと。「この表のうち◯つが埋まる」の◯には、表の中で実際に推しポイントに当てはまる項目の数以下しか書かないこと(当てはまらない項目まで「埋まる」と言わない)。「この商品に入っている」と書いてよい成分は、下の「推しポイント」に書かれているものだけ(推しポイントに無い成分名・配合量(%)を、この商品のものとして書かない)。一般的な成分の紹介は「〜が気になる人が選びがちな成分」程度の言い方にとどめ、効能を断定しない。成分と悩みの組み合わせは、一般に広く言われているもの(例: ビタミンC→くすみ・透明感の印象、セラミド→乾燥、ヒアルロン酸→うるおい)だけにし、根拠のない組み合わせ(例: アルブチン→めぐり)を作らない。
 - 本文は${BODY_MAX_LENGTH}文字以内。フックの続きとして、商品の魅力・使用感を伝えること。可能なら使い方や特徴を番号・矢印で構造化すること。
@@ -93,9 +98,14 @@ const SYSTEM_PROMPT = `あなたはThreads(Meta)向けの日本語アフィリ�
 // four evening posts don't read as one template repeated. See index.ts for
 // the hour -> style mapping. "question" posts carry no product, so they are
 // generated separately (generateQuestionPost) rather than through this type.
-export type PostStyle = "morning" | "cheatsheet" | "decisive" | "steps" | "feed";
+export type PostStyle = "morning" | "cheatsheet" | "decisive" | "steps" | "feed" | "clone";
 
 const STYLE_INSTRUCTIONS: Record<PostStyle, string> = {
+  // 2026-09-28 owner decision, 1週間だけの試し(リスクをほにょから伝えた上で承認): "feed" とは違い、
+  // 構成だけでなく文章そのものをほぼそのまま使う。他人の投稿の丸パクリに近く、著作権・炎上リスクが
+  // "feed" より明確に高いことを理解した上での実施。
+  clone:
+    "下に示す「今回お手本にする1件」の文章を、ほぼそのまま使うこと。変えてよいのは、商品名・成分名など、この商品に合わせるために本当に必要な一言・数語だけ。書き出し、改行の位置、語尾、絵文字の使い方も含めて、お手本とほぼ同じにすること。お手本に無い新しい言い回しを付け加えたり、大きく書き換えたりしないこと。早見表型・言い切り型・手順型は混ぜない。",
   feed:
     "下に示す「今回お手本にする1件」(おすすめフィードで実際に伸びていた投稿)の構成に沿って書くこと。書き出しの言い回し、改行のリズム、言いかけの引き、締め方をそのまま参考にする。ただし、お手本の話題・固有名詞・数字は使わず、この商品の紹介に置き換える。早見表型・言い切り型・手順型は混ぜない。",
   morning:
@@ -108,7 +118,28 @@ const STYLE_INSTRUCTIONS: Record<PostStyle, string> = {
     "「使い方の手順」型で書くこと。フックは「順番を変えただけで〜」のような1〜3行の短い導入(150文字以内)にとどめ、本文は①②③の手順を中心にする。早見表型・言い切り型は使わない。",
 };
 
-function buildUserPrompt(product: Product, styleExamples: StyleExample[], style?: PostStyle): string {
+// "feed" and "clone" each follow one randomly chosen example from the
+// browser-research pool rather than the whole example list. "clone"
+// (2026-09-28 owner decision) additionally prefers an example that has its
+// own photo, since the point is reusing one trending post's image+text
+// together — falls back to any example if none in the pool has a photo.
+function pickExampleToFollow(style: PostStyle | undefined, styleExamples: StyleExample[]): StyleExample | undefined {
+  if (style !== "feed" && style !== "clone") return undefined;
+  const pool = styleExamples.filter((example) => example.source === "threads_browser_research");
+  if (pool.length === 0) return undefined;
+  if (style === "clone") {
+    const withImage = pool.filter((example) => example.imageUrl);
+    if (withImage.length > 0) return withImage[Math.floor(Math.random() * withImage.length)];
+  }
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function buildUserPrompt(
+  product: Product,
+  styleExamples: StyleExample[],
+  style: PostStyle | undefined,
+  exampleToFollow: StyleExample | undefined
+): string {
   const beautyExamples = styleExamples.filter((example) => example.genre !== "other");
   const otherGenreExamples = styleExamples.filter((example) => example.genre === "other");
   const examplesBlock = beautyExamples
@@ -120,18 +151,12 @@ function buildUserPrompt(product: Product, styleExamples: StyleExample[], style?
           .map((example, index) => `参考${index + 1}:\n${example.text}`)
           .join("\n\n")}`
       : "";
-  // The "feed" style follows one randomly chosen example that the research
-  // collected from the recommended feed (2026-09-21 owner decision). With no
-  // such example available, it falls back to no forced style.
-  let feedExample: StyleExample | undefined;
-  if (style === "feed") {
-    const pool = styleExamples.filter((example) => example.source === "threads_browser_research");
-    feedExample = pool[Math.floor(Math.random() * pool.length)];
-  }
-  const effectiveStyle = style === "feed" && !feedExample ? undefined : style;
+  // "feed"/"clone" need their chosen example to actually exist; with none
+  // available, fall back to no forced style rather than an empty "お手本".
+  const effectiveStyle = (style === "feed" || style === "clone") && !exampleToFollow ? undefined : style;
   const styleBlock = effectiveStyle
     ? `\n# 今回の型(必ずこの型で書き、他の型は混ぜない)\n${STYLE_INSTRUCTIONS[effectiveStyle]}${
-        feedExample ? `\n\n## 今回お手本にする1件\n${feedExample.text}` : ""
+        exampleToFollow ? `\n\n## 今回お手本にする1件\n${exampleToFollow.text}` : ""
       }\n`
     : "";
 
@@ -204,12 +229,13 @@ export async function generatePostText(
   styleExamples: StyleExample[],
   style?: PostStyle
 ): Promise<GeneratedPost> {
+  const exampleToFollow = pickExampleToFollow(style, styleExamples);
   const response = await client.messages.create({
     model: "claude-opus-5",
     max_tokens: 1024,
     system: SYSTEM_PROMPT,
     output_config: { effort: "low" },
-    messages: [{ role: "user", content: buildUserPrompt(product, styleExamples, style) }],
+    messages: [{ role: "user", content: buildUserPrompt(product, styleExamples, style, exampleToFollow) }],
   });
 
   const textBlock = response.content.find((block) => block.type === "text");
@@ -217,5 +243,9 @@ export async function generatePostText(
     throw new Error("Claude did not return text content");
   }
 
-  return parseGeneratedPost(textBlock.text.trim());
+  const generated = parseGeneratedPost(textBlock.text.trim());
+  if (style === "clone" && exampleToFollow?.imageUrl) {
+    generated.cloneImageUrl = exampleToFollow.imageUrl;
+  }
+  return generated;
 }
