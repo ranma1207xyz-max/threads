@@ -160,6 +160,11 @@ interface CloneStyleWindowConfig {
   startDate: string; // JST calendar date, YYYY-MM-DD, inclusive
   endDate: string; // JST calendar date, YYYY-MM-DD, inclusive
   hours: number[];
+  // 2026-09-29 owner decision: pin one specific researched post (by its
+  // permalink) as the priority pick for "clone" instead of a random one —
+  // see contentGenerator.ts's pickExampleToFollow for the soft-preference
+  // fallback if it's since rotated out of style-examples.json.
+  preferredPermalink?: string;
 }
 function isCloneStyleMoment(config: CloneStyleWindowConfig): boolean {
   const now = new Date();
@@ -346,7 +351,10 @@ async function main(): Promise<void> {
   // and body for one specific post — e.g. to match a reference post's tone —
   // instead of the usual AI generation, during its configured JST window only.
   const recurringStory = isStoryMoment ? todaysRecurringStoryVariant(recurringStoryConfig!) : undefined;
-  const generated = oneTimeText ?? recurringStory ?? (await generatePostText(product, styleExamples, slot));
+  const generated =
+    oneTimeText ??
+    recurringStory ??
+    (await generatePostText(product, styleExamples, slot, researchSettings.cloneStyleWindow?.preferredPermalink));
   const { hook, body } = generated;
   // Only ever set for style "clone" (2026-09-28 owner decision, one week's
   // trial): the same trending post's own photo, paired with hook/body text

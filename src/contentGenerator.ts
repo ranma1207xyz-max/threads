@@ -123,11 +123,28 @@ const STYLE_INSTRUCTIONS: Record<PostStyle, string> = {
 // (2026-09-28 owner decision) additionally prefers an example that has its
 // own photo, since the point is reusing one trending post's image+text
 // together — falls back to any example if none in the pool has a photo.
-function pickExampleToFollow(style: PostStyle | undefined, styleExamples: StyleExample[]): StyleExample | undefined {
+//
+// preferredPermalink (2026-09-29 owner decision): after reviewing a batch of
+// research results together, the owner can pin one specific post as the
+// priority pick for "clone" (data/research-settings.json's
+// cloneStyleWindow.preferredPermalink) rather than leaving it to chance. It's
+// a soft preference, not a hard requirement — research refreshes
+// style-examples.json daily, so the pinned post can rotate out of the pool;
+// when that happens this quietly falls back to the normal random pick among
+// examples with a photo, rather than erroring.
+function pickExampleToFollow(
+  style: PostStyle | undefined,
+  styleExamples: StyleExample[],
+  preferredPermalink?: string
+): StyleExample | undefined {
   if (style !== "feed" && style !== "clone") return undefined;
   const pool = styleExamples.filter((example) => example.source === "threads_browser_research");
   if (pool.length === 0) return undefined;
   if (style === "clone") {
+    if (preferredPermalink) {
+      const pinned = pool.find((example) => example.permalink === preferredPermalink);
+      if (pinned) return pinned;
+    }
     const withImage = pool.filter((example) => example.imageUrl);
     if (withImage.length > 0) return withImage[Math.floor(Math.random() * withImage.length)];
   }
@@ -227,9 +244,10 @@ function parseGeneratedPost(raw: string): GeneratedPost {
 export async function generatePostText(
   product: Product,
   styleExamples: StyleExample[],
-  style?: PostStyle
+  style?: PostStyle,
+  preferredPermalink?: string
 ): Promise<GeneratedPost> {
-  const exampleToFollow = pickExampleToFollow(style, styleExamples);
+  const exampleToFollow = pickExampleToFollow(style, styleExamples, preferredPermalink);
   const response = await client.messages.create({
     model: "claude-opus-5",
     max_tokens: 1024,
