@@ -44,7 +44,7 @@ Threads公式APIには、他人の投稿の「いいね数」や「返信欄の�
 
 ### 実行方法とログイン
 
-- 実行: `npm run research`(GitHub Actionsでは `.github/workflows/research.yml` が毎朝6:00 JSTに自動実行し、投稿ワークフローより先に最新の型に更新する)。
+- 実行: `npm run research`(GitHub Actionsでは `.github/workflows/research.yml` が毎晩19:00 JSTに自動実行する。2026-10-01に朝6時から変更)。
 - ブラウザ操作には、ログイン済みのThreadsセッションが必要。**投稿に使っている本番アカウントと同じアカウント**でログインする(取締役会で承認済み。非公式な自動巡回のため、Threads側の検知次第でこのアカウントに制限がかかるリスクがある点は把握した上で運用する)。
 - 初回セットアップ: ローカルで `npm run research:login` を実行すると、ブラウザが開くので手動でThreadsにログイン(2段階認証があれば完了させる)し、ターミナルでEnterを押すとログイン状態が `data/threads-session.json` に保存される(このファイルはログイン情報そのものに相当するため`.gitignore`済み・絶対にコミットしない)。
   - 保存した `data/threads-session.json` の中身をbase64化し、GitHub Secretsに `THREADS_SESSION_STATE_B64` として登録する(例: `powershell -c "[Convert]::ToBase64String([IO.File]::ReadAllBytes('data/threads-session.json'))"`)。
@@ -119,7 +119,7 @@ npm run post           # 実際にThreadsへ投稿する
 
 ### 6. スケジュール実行
 
-- `.github/workflows/research.yml` が毎朝6:00 JSTに自動リサーチを実行し、`style-examples.json` を更新する。
+- `.github/workflows/research.yml` が毎晩19:00 JSTに自動リサーチを実行し、`style-examples.json` を更新する。
 - `.github/workflows/post.yml` が1日5回(8:00 / 18:00 / 19:00 / 20:00 / 21:00 JST)自動実行する。
 - 投稿の型は時間帯ごとに固定(2026-09-19 オーナー決定。夜の連投が似通わないようにするため。`src/index.ts` の `SLOT_BY_JST_HOUR`)。実行時の日本時間の「時」で決まる(GitHub Actionsの遅延は10〜15分程度なので時で判定する)。
   - 8時台・18時台: 早見表(悩み→成分の一覧。この2枠は2026-09-21のオーナー決定で、成績が良かった型に固定)
