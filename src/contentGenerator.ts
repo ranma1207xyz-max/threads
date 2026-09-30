@@ -177,8 +177,12 @@ function buildUserPrompt(
       }\n`
     : "";
 
-  return `# 参考にする「型」の例(コピーではなく構成・トーンの参考のみ)
-${examplesBlock}${otherGenreBlock}
+  const referenceBlock =
+    examplesBlock || otherGenreBlock
+      ? `# 参考にする「型」の例(コピーではなく構成・トーンの参考のみ)\n${examplesBlock}${otherGenreBlock}\n`
+      : "";
+
+  return `${referenceBlock}
 
 # 今回投稿する商品情報
 商品名: ${product.name}

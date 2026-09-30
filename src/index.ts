@@ -277,6 +277,9 @@ async function main(): Promise<void> {
   // Other-genre "structure only" examples can be switched off instantly here,
   // without waiting for the next research run (see data/research-settings.json).
   const researchSettings = readJson<{
+    // false (2026-09-30 owner decision) pauses every style example — manual
+    // and researched alike — while the research approach is reviewed.
+    useStyleExamples?: boolean;
     includeOtherGenreStyles: boolean;
     attachCheatsheetCard?: boolean;
     oneTimeOwnImage?: OwnImageConfig[];
@@ -292,9 +295,12 @@ async function main(): Promise<void> {
     recurringStorySlots?: RecurringStorySlotConfig[];
     cloneStyleWindow?: CloneStyleWindowConfig;
   }>(RESEARCH_SETTINGS_PATH);
-  const styleExamples = readJson<StyleExample[]>(STYLE_EXAMPLES_PATH).filter(
-    (example) => example.genre !== "other" || researchSettings.includeOtherGenreStyles
-  );
+  const styleExamples =
+    researchSettings.useStyleExamples === false
+      ? []
+      : readJson<StyleExample[]>(STYLE_EXAMPLES_PATH).filter(
+          (example) => example.genre !== "other" || researchSettings.includeOtherGenreStyles
+        );
   const log = readJson<PostedLogEntry[]>(POSTED_LOG_PATH);
 
   if (products.length === 0) {
