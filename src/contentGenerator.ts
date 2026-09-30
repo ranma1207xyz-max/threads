@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { existsSync, readFileSync } from "fs";
 import { config } from "./config.js";
 
 const client = new Anthropic({ apiKey: config.anthropicApiKey });
@@ -26,6 +27,16 @@ export interface StyleExample {
   matchedReplyText?: string;
   affiliateLink?: string;
   imageUrl?: string;
+  // Added 2026-10-01 (research rework): every photo on the post, the copies
+  // saved into the repo (research-images/...), and more than likes alone.
+  imageUrls?: string[];
+  localImages?: string[];
+  hasVideo?: boolean;
+  replies?: number;
+  reposts?: number;
+  score?: number;
+  topComments?: { username: string; text: string }[];
+  authorReplies?: string[];
   // "other" = a viral post from a non-beauty genre, kept only as a reference
   // for structure and phrasing (never its topic).
   genre?: "other";
@@ -98,9 +109,11 @@ const SYSTEM_PROMPT = `あなたはThreads(Meta)向けの日本語アフィリ�
 // four evening posts don't read as one template repeated. See index.ts for
 // the hour -> style mapping. "question" posts carry no product, so they are
 // generated separately (generateQuestionPost) rather than through this type.
-export type PostStyle = "morning" | "cheatsheet" | "decisive" | "steps" | "feed" | "clone";
+export type PostStyle = "morning" | "cheatsheet" | "decisive" | "steps" | "feed" | "clone" | "remix";
 
 const STYLE_INSTRUCTIONS: Record<PostStyle, string> = {
+  // Only used through generateRemixPost below, which builds its own prompt.
+  remix: "",
   // 2026-09-28 owner decision, 1週間だけの試し(リスクをほにょから伝えた上で承認): "feed" とは違い、
   // 構成だけでなく文章そのものをほぼそのまま使う。他人の投稿の丸パクリに近く、著作権・炎上リスクが
   // "feed" より明確に高いことを理解した上での実施。
@@ -270,4 +283,92 @@ export async function generatePostText(
     generated.cloneImageUrl = exampleToFollow.imageUrl;
   }
   return generated;
+}
+
+// "remix" (2026-10-01 owner decision, risk of reusing other users' images
+// accepted by the owner): one trending post's own image(s) are attached to
+// our post as-is, and Claude — shown those images, the post, and its reader
+// comments — writes brand-new wording aimed at selling our product. Unlike
+// "clone", the wording must be clearly our own; checked below.
+const REMIX_MAX_OVERLAP = 12;
+const REMIX_MAX_IMAGES_TO_CLAUDE = 4;
+
+function remixInstructions(example: StyleExample): string {
+  const comments = (example.topComments ?? []).map((c) => `- ${c.text.replace(/\n+/g, " ")}`).join("\n");
+  const authorReplies = (example.authorReplies ?? []).map((r) => `- ${r.replace(/\n+/g, " ")}`).join("\n");
+  return `# 今回の型: 伸びている投稿のリミックス(必ずこの型で書き、他の型は混ぜない)
+添付した画像は、下の「伸びている投稿」に実際に付いていた画像です。この画像は、あなたが書くフックと一緒に、そのまま新規投稿として投稿されます。
+
+手順(考える過程は出力しない):
+1. この投稿がなぜ伸びたかを考える。画像のどこで指が止まるか、書き出しのどこに引きがあるか、コメント欄の読者が何に反応し、何を知りたがっているか。
+2. フックを書く。画像と自然にかみ合い、元の投稿が伸びた理由(感情の動き・引き・テンポ・改行のリズム)を活かす。ただし文言は完全に自分の言葉で書き直すこと。元の投稿と同じ文を使わない。${REMIX_MAX_OVERLAP}文字以上同じ並びを作らない。話の流れを、この商品が応えられる悩みへ自然につなげ、最後は答えが返信にあると分かる引きで終える。
+3. 本文(返信)を書く。ここが商品を売る本編。コメント欄で読者が知りたがっていたこと・迷っていたことに先回りして答える形で、「商品名」→推しポイント(成分・使い方・使用感)→「☑︎こんな人に」→やわらかい一言、の流れで、読んだ人がリンクを押したくなるように書く。
+
+画像についての決まり:
+- 画像に写っている人物の名前を書かない。その人物がこの商品を使っている・すすめているとは書かない。
+- 画像に写っている商品を、この商品だと偽らない。元の投稿が別の商品を紹介していても、その商品名や効果は書かない。
+- 画像は「こういう肌になりたい」「こういう悩みがある」という雰囲気・きっかけとして使う。
+
+## 伸びている投稿(いいね${example.likes ?? "?"}・返信${example.replies ?? "?"}・リポスト${example.reposts ?? "?"})
+${example.text}
+${authorReplies ? `\n## 投稿者自身の返信(続き)\n${authorReplies}\n` : ""}${comments ? `\n## コメント欄の読者の声\n${comments}\n` : ""}`;
+}
+
+function imageBlocks(example: StyleExample): Anthropic.ImageBlockParam[] {
+  return (example.localImages ?? []).slice(0, REMIX_MAX_IMAGES_TO_CLAUDE).flatMap((path) => {
+    if (!existsSync(path)) return [];
+    const mediaType = path.endsWith(".png") ? "image/png" : "image/jpeg";
+    return [{ type: "image" as const, source: { type: "base64" as const, media_type: mediaType, data: readFileSync(path).toString("base64") } }];
+  });
+}
+
+// Longest run of identical characters (whitespace ignored) shared by a and b.
+export function longestSharedRun(a: string, b: string): string {
+  const x = a.replace(/\s+/g, "");
+  const y = b.replace(/\s+/g, "");
+  let best = "";
+  let prev = new Array<number>(y.length + 1).fill(0);
+  for (let i = 1; i <= x.length; i++) {
+    const cur = new Array<number>(y.length + 1).fill(0);
+    for (let j = 1; j <= y.length; j++) {
+      if (x[i - 1] === y[j - 1]) {
+        cur[j] = prev[j - 1] + 1;
+        if (cur[j] > best.length) best = x.slice(i - cur[j], i);
+      }
+    }
+    prev = cur;
+  }
+  return best;
+}
+
+export async function generateRemixPost(product: Product, example: StyleExample): Promise<GeneratedPost> {
+  const source = [example.text, ...(example.authorReplies ?? [])].join("\n");
+  const basePrompt = `${remixInstructions(example)}
+# 今回投稿する商品情報
+商品名: ${product.name}
+推しポイント:
+${product.points.map((point) => `- ${point}`).join("\n")}
+
+上記の型で、この商品のフックと本文を1組作成してください。`;
+
+  let generated: GeneratedPost | undefined;
+  let feedback = "";
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const response = await client.messages.create({
+      model: "claude-opus-5",
+      max_tokens: 1024,
+      system: SYSTEM_PROMPT,
+      output_config: { effort: "low" },
+      messages: [{ role: "user", content: [...imageBlocks(example), { type: "text", text: basePrompt + feedback }] }],
+    } as Anthropic.MessageCreateParamsNonStreaming);
+    const textBlock = response.content.find((block) => block.type === "text");
+    if (!textBlock || textBlock.type !== "text") throw new Error("Claude did not return text content");
+    generated = parseGeneratedPost(textBlock.text.trim());
+
+    const shared = longestSharedRun(`${generated.hook}\n${generated.body}`, source);
+    if (shared.length < REMIX_MAX_OVERLAP) return generated;
+    console.warn(`Remix attempt ${attempt}: ${shared.length} chars copied from the source ("${shared}").`);
+    feedback = `\n\n注意: 前回の案は元の投稿と「${shared}」が同じ並びでした。この部分を含め、元の投稿の言い回しを使わず自分の言葉で書き直してください。`;
+  }
+  return generated!;
 }

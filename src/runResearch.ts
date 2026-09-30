@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { type StyleExample } from "./contentGenerator.js";
 import {
   inspectReplies,
@@ -40,8 +40,59 @@ function isUsableOtherGenrePost(text: string): boolean {
 // account's beauty audience. Keyword search only fills in when the feed
 // yields fewer than this many usable posts.
 const FEED_SCROLLS = 60;
-const MIN_FEED_POSTS_BEFORE_KEYWORD_FALLBACK = 3;
-const MAX_AUTO_EXAMPLES = 8;
+// 2026-10-01 owner decision: collect more (8 -> 20) so the daily "remix"
+// posts (see index.ts) always have fresh image posts to choose from, and
+// always add keyword search results rather than only as a fallback.
+const MAX_AUTO_EXAMPLES = 20;
+// Images are downloaded right away (Threads' CDN URLs expire within days) and
+// committed under research-images/<JST date>/, served to Threads from
+// raw.githubusercontent.com when a remix post uses them. Capped per run to
+// keep the repository from growing too fast; older days are pruned.
+const RESEARCH_IMAGES_DIR = "research-images";
+const MAX_IMAGE_POSTS_PER_RUN = 10;
+const MAX_IMAGES_PER_POST = 4;
+const KEEP_IMAGE_DAYS = 14;
+
+// Likes alone missed "everyone stopped scrolling" posts (our 231k-view hit had
+// a 0.28% like rate), so reshares and replies count too.
+function engagementScore(post: { likes: number; replies: number; reposts: number }): number {
+  return post.likes + post.replies * 2 + post.reposts * 3;
+}
+
+function jstDate(date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(date);
+}
+
+async function downloadImages(post: QualifiedPost, dir: string): Promise<string[]> {
+  const saved: string[] = [];
+  for (const [index, url] of post.imageUrls.slice(0, MAX_IMAGES_PER_POST).entries()) {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
+      const type = response.headers.get("content-type") ?? "";
+      if (!response.ok || !/image\/(jpeg|png)/.test(type)) {
+        console.warn(`  image skipped (${response.status} ${type}): ${post.permalink}`);
+        continue;
+      }
+      const path = `${dir}/${post.postId}-${index + 1}.${type.includes("png") ? "png" : "jpg"}`;
+      writeFileSync(path, Buffer.from(await response.arrayBuffer()));
+      saved.push(path);
+    } catch (error) {
+      console.warn(`  image download failed: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+  return saved;
+}
+
+function pruneOldImages(): void {
+  if (!existsSync(RESEARCH_IMAGES_DIR)) return;
+  const cutoff = jstDate(new Date(Date.now() - KEEP_IMAGE_DAYS * 24 * 60 * 60 * 1000));
+  for (const day of readdirSync(RESEARCH_IMAGES_DIR)) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(day) && day < cutoff) {
+      rmSync(`${RESEARCH_IMAGES_DIR}/${day}`, { recursive: true, force: true });
+      console.log(`Pruned old research images: ${day}`);
+    }
+  }
+}
 // Our own posting account; its posts appear in its own feed but are not research material.
 const OWN_USERNAME = "bihada_biyoshitsu";
 
@@ -70,7 +121,8 @@ async function main(): Promise<void> {
     seenPermalinks.add(candidate.permalink);
     qualified.push(result);
     console.log(
-      `  [採用] ${candidate.permalink} (いいね${candidate.likes}` +
+      `  [採用] ${candidate.permalink} (いいね${candidate.likes}・返信${candidate.replies}・リポスト${candidate.reposts}` +
+        `・画像${candidate.imageUrls.length}枚${candidate.hasVideo ? "・動画" : ""}` +
         `${result.affiliateLinkResolved ? "・返信欄にアフィリエイトリンクあり" : ""})`
     );
     return true;
@@ -87,40 +139,44 @@ async function main(): Promise<void> {
         .slice(0, settings.maxOtherGenreExamples);
       // Structure-only references: no reply inspection, and the photo is dropped
       // so an unrelated image can never end up on one of our posts.
-      for (const candidate of others) otherGenre.push({ ...candidate, imageUrl: undefined, replyCount: 0 });
+      for (const candidate of others) {
+        otherGenre.push({ ...candidate, imageUrl: undefined, imageUrls: [], replyCount: 0, topComments: [], authorReplies: [] });
+      }
       console.log(`  -> ${otherGenre.length} other-genre post(s) kept as structure-only references.`);
     }
     console.log(`  -> ${feedCandidates.length} beauty-related post(s) in the feed meet the 7-day / 100+ likes conditions.`);
-    feedCandidates.sort((a, b) => b.likes - a.likes);
-    let feedAdopted = 0;
-    for (const candidate of feedCandidates) {
-      if (await adopt(candidate)) feedAdopted++;
+
+    // Feed first (what Threads pushes to this audience), then every keyword,
+    // pooled and ranked together; only the top ones get their replies opened.
+    const pool = new Map<string, CandidatePost>();
+    for (const candidate of feedCandidates) pool.set(candidate.permalink, candidate);
+    for (const keyword of keywords) {
+      console.log(`Searching keyword "${keyword}"...`);
+      const candidates = await searchKeywordCandidates(page, keyword);
+      console.log(`  -> ${candidates.length} candidate(s) meet the 7-day / 100+ likes conditions.`);
+      for (const candidate of candidates) if (!pool.has(candidate.permalink)) pool.set(candidate.permalink, candidate);
     }
-
-    if (feedAdopted >= MIN_FEED_POSTS_BEFORE_KEYWORD_FALLBACK) {
-      console.log("  おすすめフィードだけで十分な件数が集まったため、キーワード検索は行いません。");
-    } else {
-      console.log("  おすすめフィードの件数が少ないため、キーワード検索で補います。");
-      for (const keyword of keywords) {
-        console.log(`Searching keyword "${keyword}"...`);
-        const candidates = await searchKeywordCandidates(page, keyword);
-        console.log(`  -> ${candidates.length} candidate(s) meet the 7-day / 100+ likes conditions.`);
-
-        let matchedForKeyword = 0;
-        for (const candidate of candidates) {
-          if (await adopt(candidate)) matchedForKeyword++;
-        }
-        if (matchedForKeyword === 0) {
-          console.log(`  条件(7日以内・いいね100以上)を満たす投稿が見つかりませんでした: "${keyword}"`);
-        }
-      }
+    const ranked = Array.from(pool.values()).sort((a, b) => engagementScore(b) - engagementScore(a));
+    for (const candidate of ranked) {
+      if (qualified.length >= MAX_AUTO_EXAMPLES) break;
+      await adopt(candidate);
     }
   } finally {
     await browser.close();
   }
 
-  qualified.sort((a, b) => b.likes - a.likes);
+  qualified.sort((a, b) => engagementScore(b) - engagementScore(a));
   qualified.splice(MAX_AUTO_EXAMPLES);
+
+  pruneOldImages();
+  const imageDir = `${RESEARCH_IMAGES_DIR}/${jstDate()}`;
+  mkdirSync(imageDir, { recursive: true });
+  const localImagesByPermalink = new Map<string, string[]>();
+  for (const post of qualified.filter((p) => p.imageUrls.length > 0).slice(0, MAX_IMAGE_POSTS_PER_RUN)) {
+    const saved = await downloadImages(post, imageDir);
+    if (saved.length > 0) localImagesByPermalink.set(post.permalink, saved);
+  }
+  console.log(`Saved images for ${localImagesByPermalink.size} post(s) under ${imageDir}/.`);
 
   if (qualified.length === 0) {
     console.log("");
@@ -148,10 +204,18 @@ async function main(): Promise<void> {
     keyword: post.keyword,
     postedAt: post.postedAt.toISOString(),
     likes: post.likes,
+    replies: post.replies,
+    reposts: post.reposts,
+    score: engagementScore(post),
     replyCount: post.replyCount,
     matchedReplyText: post.matchedReplyText,
     affiliateLink: post.affiliateLinkResolved,
     imageUrl: post.imageUrl,
+    ...(post.imageUrls.length > 0 ? { imageUrls: post.imageUrls } : {}),
+    ...(localImagesByPermalink.has(post.permalink) ? { localImages: localImagesByPermalink.get(post.permalink) } : {}),
+    ...(post.hasVideo ? { hasVideo: true } : {}),
+    ...(post.topComments.length > 0 ? { topComments: post.topComments } : {}),
+    ...(post.authorReplies.length > 0 ? { authorReplies: post.authorReplies } : {}),
     ...(otherGenre.includes(post) ? { genre: "other" as const } : {}),
   }));
 

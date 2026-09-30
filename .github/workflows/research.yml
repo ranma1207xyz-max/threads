@@ -48,6 +48,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/style-examples.json
+          # Downloaded post images (used by the remix posts) and pruned old days.
+          git add -A research-images
           git diff --cached --quiet || git commit -m "chore: refresh style-examples.json from trend research [skip ci]"
           # The 19:00 post workflow may have pushed posted-log.json meanwhile; different file, so rebase is clean.
           for i in 1 2 3; do git pull --rebase && git push && break; sleep 5; done

@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import {
   generatePostText,
   generateQuestionPost,
+  generateRemixPost,
   type PostStyle,
   type Product,
   type StyleExample,
@@ -25,6 +26,10 @@ interface PostedLogEntry {
   // File name(s) (inside images/) of the owner-supplied image(s) attached, if
   // any — more than one when it was posted as a carousel.
   ownImageFiles?: string[];
+  // "remix" posts: the researched post whose image(s) and comments were used,
+  // so the same one is never remixed twice.
+  sourcePermalink?: string;
+  researchImages?: string[];
 }
 
 type Slot = PostStyle | "question";
@@ -37,6 +42,10 @@ type Slot = PostStyle | "question";
 // The earlier morning / decisive / steps / feed / question styles are kept in
 // the code but not scheduled; e.g. set 20 back to "question" to bring the
 // question-only post back, or back to "feed" etc. per the pre-9/26 mapping.
+// "remix" (2026-10-01): a trending post's own image(s) + our own rewritten
+// wording aimed at selling our product (see contentGenerator.ts). Which hours
+// use it is awaiting the owner's final answer, so none do yet. A remix hour
+// with no usable researched post falls back to cheatsheet.
 const SLOT_BY_JST_HOUR: Record<number, Slot> = {
   8: "cheatsheet",
   18: "cheatsheet",
@@ -44,7 +53,7 @@ const SLOT_BY_JST_HOUR: Record<number, Slot> = {
   20: "cheatsheet",
   21: "cheatsheet",
 };
-const KNOWN_SLOTS = new Set<string>(["morning", "cheatsheet", "decisive", "question", "steps", "feed", "clone"]);
+const KNOWN_SLOTS = new Set<string>(["morning", "cheatsheet", "decisive", "question", "steps", "feed", "clone", "remix"]);
 
 // Which post shape to use, decided by the Japan-time hour the run happens in
 // (2026-09-19 owner decision: split the evening posts by type so they don't
@@ -232,6 +241,32 @@ function pickOwnImages(log: PostedLogEntry[], config: OwnImageConfig): { files: 
   return { files: [file], urls: [toUrl(file)] };
 }
 
+// The best-scoring researched post that has its images saved in the repo and
+// has not been remixed before. Read straight from style-examples.json,
+// independent of useStyleExamples (which only governs the text references).
+function pickRemixExample(log: PostedLogEntry[]): StyleExample | undefined {
+  const used = new Set(log.map((entry) => entry.sourcePermalink).filter(Boolean));
+  return readJson<StyleExample[]>(STYLE_EXAMPLES_PATH)
+    .filter(
+      (example) =>
+        example.source === "threads_browser_research" &&
+        example.genre !== "other" &&
+        example.permalink &&
+        !used.has(example.permalink) &&
+        example.localImages &&
+        example.localImages.length > 0 &&
+        example.localImages.every((path) => existsSync(path))
+    )
+    .sort((a, b) => (b.score ?? b.likes ?? 0) - (a.score ?? a.likes ?? 0))[0];
+}
+
+function repoFileUrl(path: string): string | undefined {
+  const repository = process.env.GITHUB_REPOSITORY;
+  const branch = process.env.GITHUB_REF_NAME;
+  if (!repository || !branch) return undefined;
+  return `https://raw.githubusercontent.com/${repository}/${branch}/${path.split("/").map(encodeURIComponent).join("/")}`;
+}
+
 function pickNextProduct(products: Product[], log: PostedLogEntry[]): Product {
   const lastPostedAt = new Map<string, string>();
   for (const entry of log) {
@@ -357,10 +392,21 @@ async function main(): Promise<void> {
   // and body for one specific post — e.g. to match a reference post's tone —
   // instead of the usual AI generation, during its configured JST window only.
   const recurringStory = isStoryMoment ? todaysRecurringStoryVariant(recurringStoryConfig!) : undefined;
+  const remixExample = slot === "remix" && !oneTimeText && !isStoryMoment ? pickRemixExample(log) : undefined;
+  if (slot === "remix" && !remixExample) console.log("Remix: no unused researched post with saved images, using cheatsheet instead.");
+  if (remixExample) console.log(`Remix source: ${remixExample.permalink} (score ${remixExample.score ?? remixExample.likes})`);
+  const effectiveSlot: Slot | undefined = slot === "remix" && !remixExample ? "cheatsheet" : slot;
   const generated =
     oneTimeText ??
     recurringStory ??
-    (await generatePostText(product, styleExamples, slot, researchSettings.cloneStyleWindow?.preferredPermalink));
+    (remixExample
+      ? await generateRemixPost(product, remixExample)
+      : await generatePostText(
+          product,
+          styleExamples,
+          effectiveSlot as PostStyle | undefined,
+          researchSettings.cloneStyleWindow?.preferredPermalink
+        ));
   const { hook, body } = generated;
   // Only ever set for style "clone" (2026-09-28 owner decision, one week's
   // trial): the same trending post's own photo, paired with hook/body text
@@ -397,7 +443,7 @@ async function main(): Promise<void> {
   // simply goes out without the card.
   let cardUrl: string | undefined;
   // attachCheatsheetCard in data/research-settings.json is the on/off switch.
-  if (slot === "cheatsheet" && !isOneTimeOverrideMoment && researchSettings.attachCheatsheetCard !== false) {
+  if (effectiveSlot === "cheatsheet" && !isOneTimeOverrideMoment && researchSettings.attachCheatsheetCard !== false) {
     try {
       const rows = parseCheatsheetRows(hook);
       if (!hasEnoughRows(rows)) {
@@ -418,15 +464,29 @@ async function main(): Promise<void> {
   // Cheat-sheet posts keep their card (or the old fallbacks), unless this
   // moment is a one-time override, in which case its own image always wins.
   const ownImages =
-    (slot === "cheatsheet" && !isOneTimeOverrideMoment) || cardUrl || !ownImageConfig
+    (effectiveSlot === "cheatsheet" && !isOneTimeOverrideMoment) || cardUrl || !ownImageConfig
       ? undefined
       : pickOwnImages(log, ownImageConfig);
-  const trendImageUrl = cardUrl || ownImages ? undefined : cloneImageUrl ?? pickTrendImageUrl(styleExamples);
+  // Remix images: the researched post's own photos, committed to the repo by
+  // the research run. Locally (no GitHub env) there is no public URL, so a dry
+  // run just reports the files.
+  const remixImageUrls = remixExample?.localImages?.map(repoFileUrl).filter((url): url is string => Boolean(url));
+  const remixUrls = remixImageUrls && remixImageUrls.length > 0 ? remixImageUrls.slice(0, 10) : undefined;
+  if (remixExample && !remixUrls) console.log(`Remix images (local only, no public URL here): ${remixExample.localImages!.join(", ")}`);
+  const trendImageUrl = cardUrl || ownImages || remixUrls ? undefined : cloneImageUrl ?? pickTrendImageUrl(styleExamples);
   // attachedImageUrls may hold more than one URL only for an owner-supplied
   // carousel (see OwnImageConfig.files above); every other source is a single
   // image. `imageUrl` (its first/only entry) is what the single-image posting
   // path and its own-product-image fallback below use.
-  const attachedImageUrls = cardUrl ? [cardUrl] : ownImages ? ownImages.urls : trendImageUrl ? [trendImageUrl] : undefined;
+  const attachedImageUrls = cardUrl
+    ? [cardUrl]
+    : ownImages
+    ? ownImages.urls
+    : remixUrls
+    ? remixUrls
+    : trendImageUrl
+    ? [trendImageUrl]
+    : undefined;
   const imageUrl = attachedImageUrls?.[0] ?? product.imageUrl;
 
   // The ad disclosure required by the stealth-marketing regulation (景品表示法)
@@ -457,6 +517,8 @@ async function main(): Promise<void> {
         ? ownImages.files.length > 1
           ? ` (owner-supplied carousel: ${ownImages.files.join(" -> ")})`
           : " (owner-supplied image)"
+        : remixUrls
+        ? ` (remix of ${remixExample!.permalink})`
         : trendImageUrl
         ? " (from a trending-post example)"
         : ""
@@ -523,6 +585,8 @@ async function main(): Promise<void> {
     threadsPostId,
     threadsReplyId,
     ...(ownImages && !usedFallbackImage ? { ownImageFiles: ownImages.files } : {}),
+    ...(remixExample ? { sourcePermalink: remixExample.permalink } : {}),
+    ...(remixUrls && !usedFallbackImage ? { researchImages: remixExample!.localImages } : {}),
   });
   writeFileSync(POSTED_LOG_PATH, JSON.stringify(log, null, 2) + "\n");
 }

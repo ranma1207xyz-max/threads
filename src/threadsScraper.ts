@@ -12,8 +12,12 @@ const DEBUG_DIR = "debug";
 const SESSION_STATE_PATH = "data/threads-session.json";
 const SEARCH_URL = "https://www.threads.com/search";
 const LOOKBACK_DAYS = 7;
+// Keyword search's "top results" are mostly weeks-old proven posts, so a
+// 7-day window left it with 0 candidates every day (checked 2026-10-01).
+const KEYWORD_LOOKBACK_DAYS = 30;
 const MIN_LIKES = 100;
-const MAX_SCROLLS = 6;
+const MIN_REPOSTS = 20;
+const MAX_SCROLLS = 10;
 
 export interface AffiliateDomainsConfig {
   domains: string[];
@@ -27,12 +31,31 @@ export interface CandidatePost {
   text: string;
   postedAt: Date;
   likes: number;
+  // Action-bar counts next to the like count (2026-10-01 owner decision: judge
+  // posts by more than likes alone). 0 when blank.
+  replies: number;
+  reposts: number;
   keyword: string;
+  // First of imageUrls, kept for older callers.
   imageUrl?: string;
+  // Every photo on the post, in order (a carousel has several). For a video
+  // post this is its still thumbnail.
+  imageUrls: string[];
+  hasVideo: boolean;
+}
+
+export interface ReplySnippet {
+  username: string;
+  text: string;
 }
 
 export interface QualifiedPost extends CandidatePost {
   replyCount: number;
+  // What readers actually said under the post (2026-10-01 owner decision:
+  // reference the comments too, not just the post). Excludes the author.
+  topComments: ReplySnippet[];
+  // The author's own replies — usually where the product/link is revealed.
+  authorReplies: string[];
   // Only present when a reply's link was confirmed as an affiliate link.
   // Having one is no longer required for adoption (2026-09-19 owner decision).
   matchedReplyText?: string;
@@ -46,7 +69,10 @@ interface RawPost {
   text: string;
   timestampLabel: string;
   likesLabel: string;
-  imageUrl?: string;
+  repliesLabel: string;
+  repostsLabel: string;
+  imageUrls: string[];
+  hasVideo: boolean;
 }
 
 function loadAffiliateDomains(): AffiliateDomainsConfig {
@@ -111,7 +137,13 @@ function extractUsernameFromPermalink(permalink: string): string {
 
 function parseLikeCount(raw: string): number {
   // Threads abbreviates large counts, e.g. "1.2万" (12,000) or "3,844".
-  const cleaned = raw.trim();
+  let cleaned = raw.trim();
+  // A count caught mid-animation renders as one digit per line, old value
+  // then new (e.g. "3\n9\n7\n3\n9\n8" for 397 -> 398): keep the new half.
+  if (cleaned.includes("\n")) {
+    const parts = cleaned.split(/\s+/);
+    cleaned = parts.slice(Math.floor(parts.length / 2)).join("");
+  }
   const manMatch = cleaned.match(/^([\d.]+)万$/);
   if (manMatch) return Math.round(Number(manMatch[1]) * 10000);
   const numeric = Number(cleaned.replace(/,/g, ""));
@@ -158,7 +190,14 @@ export async function searchKeywordCandidates(page: Page, keyword: string): Prom
     return [];
   }
 
-  for (let i = 0; i < MAX_SCROLLS; i++) {
+  // Same as the feed: the results column only keeps nearby posts in the DOM
+  // and only scrolls with the mouse over it, so collect after every step.
+  await page.mouse.move(640, 500);
+  const byPermalink = new Map<string, CandidatePost>();
+  for (let i = 0; i <= MAX_SCROLLS; i++) {
+    for (const candidate of await extractCandidates(page, keyword, KEYWORD_LOOKBACK_DAYS)) {
+      byPermalink.set(candidate.permalink, candidate);
+    }
     await page.mouse.wheel(0, 2000);
     await page.waitForTimeout(1200);
   }
@@ -168,7 +207,7 @@ export async function searchKeywordCandidates(page: Page, keyword: string): Prom
     await page.screenshot({ path: `${DEBUG_DIR}/search-${keyword}.png`, fullPage: true });
   }
 
-  return extractCandidates(page, keyword);
+  return Array.from(byPermalink.values());
 }
 
 // Threads' home "おすすめ" (For You) tab is a personalized feed driven by the
@@ -224,8 +263,8 @@ export function isBeautyRelated(text: string): boolean {
   return BEAUTY_TERMS.some((term) => text.includes(term));
 }
 
-async function extractCandidates(page: Page, keyword: string): Promise<CandidatePost[]> {
-  const cutoff = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+async function extractCandidates(page: Page, keyword: string, lookbackDays = LOOKBACK_DAYS): Promise<CandidatePost[]> {
+  const cutoff = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
 
   const rawPosts: RawPost[] = await page.evaluate((labelPattern) => {
     const timestampRegex = new RegExp(labelPattern);
@@ -266,6 +305,8 @@ async function extractCandidates(page: Page, keyword: string): Promise<Candidate
       // in the post's container, after any profile/follow/media buttons.
       const actionButtons = Array.from(container.querySelectorAll('button, [role="button"]')).slice(-4) as HTMLElement[];
       const likesLabel = actionButtons[0]?.innerText.trim() || "0";
+      const repliesLabel = actionButtons[1]?.innerText.trim() || "0";
+      const repostsLabel = actionButtons[2]?.innerText.trim() || "0";
 
       const skipTexts = new Set([username, "もっと見る", "投稿者", timestampLabel]);
       const textNodes = Array.from(container.querySelectorAll("span"))
@@ -273,14 +314,34 @@ async function extractCandidates(page: Page, keyword: string): Promise<Candidate
         .filter((t) => t.length > 3 && !skipTexts.has(t) && !/^[\d,.]+万?$/.test(t));
       const text = Array.from(new Set(textNodes)).join("\n");
 
-      // The post's own photo(s) render with an alt text starting with
-      // "Photo by ..." — distinct from the profile picture (alt ends in
-      // "のプロフィール写真") and follow-button icons (no alt at all). Only
-      // the first photo is used when a post has more than one.
-      const photoImg = container.querySelector('img[alt^="Photo by "]') as HTMLImageElement | null;
-      const imageUrl = photoImg?.src || undefined;
+      // The post's own photos. They used to carry an alt text starting with
+      // "Photo by ...", but by 2026-10 Threads renders them with an empty
+      // alt (confirmed with a live DOM probe), which is why research had
+      // almost stopped finding images. Now: every <img> that is not a
+      // profile picture (alt ends in "のプロフィール写真", 36px) or a small
+      // icon. The src is the full-size image (~1179px wide) even though
+      // the feed shows a ~150px thumbnail.
+      const imageUrls = Array.from(container.querySelectorAll("img"))
+        .filter((img) => {
+          const el = img as HTMLImageElement;
+          if (/プロフィール写真|profile picture/i.test(el.alt)) return false;
+          const rect = el.getBoundingClientRect();
+          return Math.max(rect.width, el.naturalWidth) >= 100 && el.src.startsWith("http");
+        })
+        .map((img) => (img as HTMLImageElement).src);
+      const hasVideo = container.querySelector("video") !== null;
 
-      results.push({ permalink: href, username, text, timestampLabel, likesLabel, imageUrl });
+      results.push({
+        permalink: href,
+        username,
+        text,
+        timestampLabel,
+        likesLabel,
+        repliesLabel,
+        repostsLabel,
+        imageUrls: Array.from(new Set(imageUrls)),
+        hasVideo,
+      });
     }
     return results;
   }, TIMESTAMP_LABEL_SOURCE);
@@ -290,7 +351,9 @@ async function extractCandidates(page: Page, keyword: string): Promise<Candidate
     const postedAt = parseThreadsTimestamp(raw.timestampLabel);
     if (!postedAt || postedAt < cutoff) continue;
     const likes = parseLikeCount(raw.likesLabel);
-    if (likes < MIN_LIKES) continue;
+    // A post that was widely reshared qualifies even with fewer likes: our own
+    // 231k-view hit (9/27) had a like rate of only 0.28%.
+    if (likes < MIN_LIKES && parseLikeCount(raw.repostsLabel) < MIN_REPOSTS) continue;
 
     const permalink = new URL(raw.permalink, "https://www.threads.com").toString();
     candidates.push({
@@ -300,8 +363,12 @@ async function extractCandidates(page: Page, keyword: string): Promise<Candidate
       text: raw.text,
       postedAt,
       likes,
+      replies: parseLikeCount(raw.repliesLabel),
+      reposts: parseLikeCount(raw.repostsLabel),
       keyword,
-      imageUrl: raw.imageUrl,
+      imageUrl: raw.imageUrls[0],
+      imageUrls: raw.imageUrls,
+      hasVideo: raw.hasVideo,
     });
   }
   return candidates;
@@ -353,9 +420,9 @@ export async function inspectReplies(page: Page, candidate: CandidatePost): Prom
 
   const rootPath = new URL(candidate.permalink).pathname;
 
-  const replyTexts: string[] = await page.evaluate(({ rootPathArg, labelPattern }) => {
+  const replies: { username: string; body: string; text: string }[] = await page.evaluate(({ rootPathArg, labelPattern }) => {
     const timestampRegex = new RegExp(labelPattern);
-    const texts: string[] = [];
+    const texts: { username: string; body: string; text: string }[] = [];
     const seen = new Set<string>();
     const anchors = Array.from(document.querySelectorAll('a[href*="/post/"]')) as HTMLElement[];
 
@@ -379,22 +446,41 @@ export async function inspectReplies(page: Page, candidate: CandidatePost): Prom
       }
       if (!container) continue;
       const body = container.innerText.trim();
-      if (body) texts.push(body);
+      const usernameLink = container.querySelector('a[href^="/@"]:not([href*="/post/"])') as HTMLElement | null;
+      const username = usernameLink ? usernameLink.innerText.trim() : "";
+      // Just the reply's own words, same filtering as the feed extraction.
+      const skipTexts = new Set([username, "もっと見る", "投稿者", timestampLabel]);
+      const text = Array.from(
+        new Set(
+          Array.from(container.querySelectorAll("span"))
+            .map((el) => (el as HTMLElement).innerText.trim())
+            .filter((t) => t.length > 1 && !skipTexts.has(t) && !/^[\d,.]+万?$/.test(t))
+        )
+      ).join("\n");
+      if (body) texts.push({ username, body, text });
     }
     return texts;
   }, { rootPathArg: rootPath, labelPattern: TIMESTAMP_LABEL_SOURCE });
 
-  const replyCount = replyTexts.length;
+  const replyCount = replies.length;
+  const topComments = replies
+    .filter((reply) => reply.username && reply.username !== candidate.username && reply.text)
+    .slice(0, 8)
+    .map((reply) => ({ username: reply.username, text: reply.text.slice(0, 200) }));
+  const authorReplies = replies
+    .filter((reply) => reply.username === candidate.username && reply.text)
+    .slice(0, 3)
+    .map((reply) => reply.text.slice(0, 500));
+  const base = { ...candidate, replyCount, topComments, authorReplies };
 
-  for (const replyText of replyTexts) {
+  for (const replyText of replies.map((reply) => reply.body)) {
     const urls = replyText.match(URL_PATTERN);
     if (!urls) continue;
     for (const rawUrl of urls) {
       const resolved = await resolveAffiliateLink(rawUrl, affiliateDomains);
       if (resolved) {
         return {
-          ...candidate,
-          replyCount,
+          ...base,
           matchedReplyText: replyText,
           affiliateLinkRaw: rawUrl,
           affiliateLinkResolved: resolved,
@@ -402,5 +488,5 @@ export async function inspectReplies(page: Page, candidate: CandidatePost): Prom
       }
     }
   }
-  return { ...candidate, replyCount };
+  return base;
 }
