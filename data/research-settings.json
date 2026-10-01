@@ -2,12 +2,12 @@
   "useStyleExamples": false,
   "_useStyleExamplesComment": "2026-09-30 オーナー決定: お手本(style-examples.json、手動登録分・自動リサーチ分とも)を投稿生成に使うのを一旦取りやめ、見直す。リサーチ自体(毎朝6時)は続けて記録だけ残す。trueに戻せば元どおりお手本を使う。",
   "includeOtherGenreStyles": true,
-  "attachCheatsheetCard": false,
+  "attachCheatsheetCard": true,
   "cheatsheetCardHours": [
     18,
     19
   ],
-  "_cheatsheetCardComment": "2026-10-01 オーナー決定: 18時・19時は自社画像(この早見表カード)、8時は今まで通り画像なし。20時・21時はリミックス型(引用画像)。カードのデザインはオーナー承認待ちのため、attachCheatsheetCardは承認後にtrueにする。",
+  "_cheatsheetCardComment": "2026-10-01 オーナー決定: 18時・19時は自社画像(この早見表カード)、8時は今まで通り画像なし。20時・21時はリミックス型(引用画像)。カードのデザインはオーナーが「承認不要」としたため、同日から有効化。止めるときはattachCheatsheetCardをfalseにする。",
   "maxOtherGenreExamples": 4,
   "oneTimeOwnImage": [
     {

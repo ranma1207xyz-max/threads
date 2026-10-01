@@ -54,9 +54,10 @@ function buildHtml(rows: CheatsheetRow[]): string {
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { width: ${CARD_WIDTH}px; height: ${CARD_HEIGHT}px; font-family: "Noto Sans JP", "Yu Gothic", "IPAexGothic", "IPAGothic", sans-serif;
-         background: linear-gradient(160deg, #fdf7f2 0%, #f6e6e3 100%); color: #3b2f2f; padding: 72px 72px 56px; }
+         background: linear-gradient(160deg, #fdf7f2 0%, #f6e6e3 100%); color: #3b2f2f; padding: 72px 72px 120px; display: flex; flex-direction: column; }
   .title { font-size: 68px; font-weight: 900; letter-spacing: 2px; text-align: center; }
   .sub { margin: 14px 0 44px; font-size: 30px; font-weight: 500; text-align: center; color: #8a6f6b; }
+  .rows { flex: 1; display: flex; flex-direction: column; justify-content: center; }
   .row { display: flex; align-items: center; margin-bottom: 14px; padding: 0 36px; background: #ffffff; border-radius: 28px;
          box-shadow: 0 6px 18px rgba(120, 80, 70, 0.10); }
   .concern { flex: 1; font-size: 40px; font-weight: 700; }
@@ -67,7 +68,7 @@ function buildHtml(rows: CheatsheetRow[]): string {
 <body>
   <div class="title">悩み別 成分早見表</div>
   <div class="sub">気になる悩みで選びがちな成分の目安</div>
-  ${rowsHtml}
+  <div class="rows">${rowsHtml}</div>
   <div class="foot">※一般に言われている目安で、効果を保証するものではありません</div>
 </body></html>`;
 }
