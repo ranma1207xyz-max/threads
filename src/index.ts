@@ -30,6 +30,9 @@ interface PostedLogEntry {
   // so the same one is never remixed twice.
   sourcePermalink?: string;
   researchImages?: string[];
+  // The self-made cheat-sheet card's public URL, when one was attached — so
+  // card posts can be told apart from image-free ones when comparing views.
+  cardImage?: string;
 }
 
 type Slot = PostStyle | "question";
@@ -611,6 +614,7 @@ async function main(): Promise<void> {
     ...(ownImages && !usedFallbackImage ? { ownImageFiles: ownImages.files } : {}),
     ...(remixExample ? { sourcePermalink: remixExample.permalink } : {}),
     ...(remixUrls && !usedFallbackImage ? { researchImages: remixExample!.localImages } : {}),
+    ...(cardUrl && !usedFallbackImage ? { cardImage: cardUrl } : {}),
   });
   writeFileSync(POSTED_LOG_PATH, JSON.stringify(log, null, 2) + "\n");
 }
