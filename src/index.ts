@@ -43,16 +43,26 @@ type Slot = PostStyle | "question";
 // the code but not scheduled; e.g. set 20 back to "question" to bring the
 // question-only post back, or back to "feed" etc. per the pre-9/26 mapping.
 // "remix" (2026-10-01): a trending post's own image(s) + our own rewritten
-// wording aimed at selling our product (see contentGenerator.ts). Which hours
-// use it is awaiting the owner's final answer, so none do yet. A remix hour
+// wording aimed at selling our product (see contentGenerator.ts). A remix hour
 // with no usable researched post falls back to cheatsheet.
+// 2026-10-01 owner decision on images per hour: 8:00 unchanged (cheatsheet,
+// no image); 18:00/19:00 our own image (the self-made cheat-sheet card, see
+// cheatsheetCardHours in data/research-settings.json); 20:00/21:00 a quoted
+// image from a trending post, written as "remix". The 20:00/21:00 A/B test
+// (recurringStorySlots, planned through 10/3) was ended early for this.
 const SLOT_BY_JST_HOUR: Record<number, Slot> = {
   8: "cheatsheet",
   18: "cheatsheet",
   19: "cheatsheet",
-  20: "cheatsheet",
-  21: "cheatsheet",
+  20: "remix",
+  21: "remix",
 };
+
+function currentJstHour(): number {
+  return Number(
+    new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", hour: "numeric", hourCycle: "h23" }).format(new Date())
+  );
+}
 const KNOWN_SLOTS = new Set<string>(["morning", "cheatsheet", "decisive", "question", "steps", "feed", "clone", "remix"]);
 
 // Which post shape to use, decided by the Japan-time hour the run happens in
@@ -317,6 +327,9 @@ async function main(): Promise<void> {
     useStyleExamples?: boolean;
     includeOtherGenreStyles: boolean;
     attachCheatsheetCard?: boolean;
+    // JST hours whose cheat-sheet posts get the card (2026-10-01 owner
+    // decision: 18 and 19 only, 8:00 stays image-free). Unset = every hour.
+    cheatsheetCardHours?: number[];
     oneTimeOwnImage?: OwnImageConfig[];
     // url/productId (2026-09-25 owner decision): lets a one-time post advertise
     // something outside data/products.json (e.g. a single guest product) —
@@ -442,8 +455,19 @@ async function main(): Promise<void> {
   // decision). A failure to render or host it must never block the post: it
   // simply goes out without the card.
   let cardUrl: string | undefined;
-  // attachCheatsheetCard in data/research-settings.json is the on/off switch.
-  if (effectiveSlot === "cheatsheet" && !isOneTimeOverrideMoment && researchSettings.attachCheatsheetCard !== false) {
+  // attachCheatsheetCard in data/research-settings.json is the on/off switch;
+  // cheatsheetCardHours limits it to specific hours. A --slot= dry run counts
+  // as a card hour so the card can be previewed at any time.
+  const isCardHour =
+    !researchSettings.cheatsheetCardHours ||
+    researchSettings.cheatsheetCardHours.includes(currentJstHour()) ||
+    (dryRun && process.argv.some((arg) => arg.startsWith("--slot=")));
+  if (
+    effectiveSlot === "cheatsheet" &&
+    !isOneTimeOverrideMoment &&
+    researchSettings.attachCheatsheetCard !== false &&
+    isCardHour
+  ) {
     try {
       const rows = parseCheatsheetRows(hook);
       if (!hasEnoughRows(rows)) {
