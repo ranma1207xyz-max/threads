@@ -49,16 +49,18 @@ type Slot = PostStyle | "question";
 // wording aimed at selling our product (see contentGenerator.ts). A remix hour
 // with no usable researched post falls back to cheatsheet.
 // 2026-10-01 owner decision on images per hour: 8:00 unchanged (cheatsheet,
-// no image); 18:00/19:00 our own image (the self-made cheat-sheet card, see
+// no image); 18:00/22:00 our own image (the self-made cheat-sheet card, see
 // cheatsheetCardHours in data/research-settings.json); 20:00/21:00 a quoted
 // image from a trending post, written as "remix". The 20:00/21:00 A/B test
 // (recurringStorySlots, planned through 10/3) was ended early for this.
+// 19:00 moved to 22:00 the same day: its median views at ~24h were 109, about
+// a quarter of 18:00/20:00 (see .github/workflows/post.yml for the schedule).
 const SLOT_BY_JST_HOUR: Record<number, Slot> = {
   8: "cheatsheet",
   18: "cheatsheet",
-  19: "cheatsheet",
   20: "remix",
   21: "remix",
+  22: "cheatsheet",
 };
 
 function currentJstHour(): number {

@@ -5,9 +5,9 @@
   "attachCheatsheetCard": true,
   "cheatsheetCardHours": [
     18,
-    19
+    22
   ],
-  "_cheatsheetCardComment": "2026-10-01 オーナー決定: 18時・19時は自社画像(この早見表カード)、8時は今まで通り画像なし。20時・21時はリミックス型(引用画像)。カードのデザインはオーナーが「承認不要」としたため、同日から有効化。止めるときはattachCheatsheetCardをfalseにする。",
+  "_cheatsheetCardComment": "2026-10-01 オーナー決定: 18時・22時は自社画像(この早見表カード)、8時は今まで通り画像なし。20時・21時はリミックス型(引用画像)。19時は閲覧が少ないため同日22時へ移動。カードのデザインはオーナーが「承認不要」としたため同日から有効化。止めるときはattachCheatsheetCardをfalseにする。",
   "maxOtherGenreExamples": 4,
   "oneTimeOwnImage": [
     {

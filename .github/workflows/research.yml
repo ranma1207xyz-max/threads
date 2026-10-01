@@ -3,7 +3,7 @@ name: Threads trend research
 on:
   schedule:
     # 19:00 JST (UTC+9) -> 10:00 UTC (2026-10-01 オーナー決定で朝6時から変更)。
-    # 19時の投稿ワークフローと同時刻に動くため、push前に最新を取り込む(下のCommitステップ)。
+    # 投稿ワークフローと近い時刻に動くため、push前に最新を取り込む(下のCommitステップ)。2026-10-01に19時の投稿は22時へ移動。
     - cron: "0 10 * * *"
   workflow_dispatch:
 
@@ -51,5 +51,5 @@ jobs:
           # Downloaded post images (used by the remix posts) and pruned old days.
           git add -A research-images
           git diff --cached --quiet || git commit -m "chore: refresh style-examples.json from trend research [skip ci]"
-          # The 19:00 post workflow may have pushed posted-log.json meanwhile; different file, so rebase is clean.
+          # A post workflow may have pushed posted-log.json meanwhile; different file, so rebase is clean.
           for i in 1 2 3; do git pull --rebase && git push && break; sleep 5; done
