@@ -3,6 +3,7 @@ import {
   generatePostText,
   generateQuestionPost,
   generateRemixPost,
+  isConcernProductImage,
   type PostStyle,
   type Product,
   type StyleExample,
@@ -55,11 +56,18 @@ type Slot = PostStyle | "question";
 // (recurringStorySlots, planned through 10/3) was ended early for this.
 // 19:00 moved to 22:00 the same day: its median views at ~24h were 109, about
 // a quarter of 18:00/20:00 (see .github/workflows/post.yml for the schedule).
+// 2026-10-03 owner decision: 6 posts a day. Four "concern" posts (8/18/20/22 —
+// 10/2 20:00's remix of an Anua by-concern photo grid hit 2,909 views in ~3h)
+// plus two other trending types, one each: 12:00 (new) "translate", 21:00
+// "surprise" (21:00's remixes of person photos had drawn 182/254 views).
+// 20:00's remix only uses researched posts whose images are skincare products
+// or a by-concern chart (pickRemixExample), else falls back to the card.
 const SLOT_BY_JST_HOUR: Record<number, Slot> = {
   8: "cheatsheet",
+  12: "translate",
   18: "cheatsheet",
   20: "remix",
-  21: "remix",
+  21: "surprise",
   22: "cheatsheet",
 };
 
@@ -68,7 +76,18 @@ function currentJstHour(): number {
     new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", hour: "numeric", hourCycle: "h23" }).format(new Date())
   );
 }
-const KNOWN_SLOTS = new Set<string>(["morning", "cheatsheet", "decisive", "question", "steps", "feed", "clone", "remix"]);
+const KNOWN_SLOTS = new Set<string>([
+  "morning",
+  "cheatsheet",
+  "decisive",
+  "question",
+  "steps",
+  "feed",
+  "clone",
+  "remix",
+  "translate",
+  "surprise",
+]);
 
 // Which post shape to use, decided by the Japan-time hour the run happens in
 // (2026-09-19 owner decision: split the evening posts by type so they don't
@@ -256,12 +275,17 @@ function pickOwnImages(log: PostedLogEntry[], config: OwnImageConfig): { files: 
   return { files: [file], urls: [toUrl(file)] };
 }
 
-// The best-scoring researched post that has its images saved in the repo and
-// has not been remixed before. Read straight from style-examples.json,
+// The best-scoring researched post that has its images saved in the repo, has
+// not been remixed before, and whose images show skincare products or a
+// by-concern chart (2026-10-03 owner decision, checked by Claude — see
+// isConcernProductImage). Only the top few candidates are checked, to keep
+// the extra API calls small. Read straight from style-examples.json,
 // independent of useStyleExamples (which only governs the text references).
-function pickRemixExample(log: PostedLogEntry[]): StyleExample | undefined {
+const REMIX_CANDIDATES_TO_CHECK = 5;
+
+async function pickRemixExample(log: PostedLogEntry[]): Promise<StyleExample | undefined> {
   const used = new Set(log.map((entry) => entry.sourcePermalink).filter(Boolean));
-  return readJson<StyleExample[]>(STYLE_EXAMPLES_PATH)
+  const candidates = readJson<StyleExample[]>(STYLE_EXAMPLES_PATH)
     .filter(
       (example) =>
         example.source === "threads_browser_research" &&
@@ -272,7 +296,13 @@ function pickRemixExample(log: PostedLogEntry[]): StyleExample | undefined {
         example.localImages.length > 0 &&
         example.localImages.every((path) => existsSync(path))
     )
-    .sort((a, b) => (b.score ?? b.likes ?? 0) - (a.score ?? a.likes ?? 0))[0];
+    .sort((a, b) => (b.score ?? b.likes ?? 0) - (a.score ?? a.likes ?? 0))
+    .slice(0, REMIX_CANDIDATES_TO_CHECK);
+  for (const candidate of candidates) {
+    if (await isConcernProductImage(candidate)) return candidate;
+    console.log(`Remix: skipped ${candidate.permalink} (images are not skincare products / a by-concern chart).`);
+  }
+  return undefined;
 }
 
 function repoFileUrl(path: string): string | undefined {
@@ -410,7 +440,7 @@ async function main(): Promise<void> {
   // and body for one specific post — e.g. to match a reference post's tone —
   // instead of the usual AI generation, during its configured JST window only.
   const recurringStory = isStoryMoment ? todaysRecurringStoryVariant(recurringStoryConfig!) : undefined;
-  const remixExample = slot === "remix" && !oneTimeText && !isStoryMoment ? pickRemixExample(log) : undefined;
+  const remixExample = slot === "remix" && !oneTimeText && !isStoryMoment ? await pickRemixExample(log) : undefined;
   if (slot === "remix" && !remixExample) console.log("Remix: no unused researched post with saved images, using cheatsheet instead.");
   if (remixExample) console.log(`Remix source: ${remixExample.permalink} (score ${remixExample.score ?? remixExample.likes})`);
   const effectiveSlot: Slot | undefined = slot === "remix" && !remixExample ? "cheatsheet" : slot;

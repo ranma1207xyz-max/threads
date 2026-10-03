@@ -109,9 +109,30 @@ const SYSTEM_PROMPT = `あなたはThreads(Meta)向けの日本語アフィリ�
 // four evening posts don't read as one template repeated. See index.ts for
 // the hour -> style mapping. "question" posts carry no product, so they are
 // generated separately (generateQuestionPost) rather than through this type.
-export type PostStyle = "morning" | "cheatsheet" | "decisive" | "steps" | "feed" | "clone" | "remix";
+export type PostStyle =
+  | "morning"
+  | "cheatsheet"
+  | "decisive"
+  | "steps"
+  | "feed"
+  | "clone"
+  | "remix"
+  | "translate"
+  | "surprise";
 
 const STYLE_INSTRUCTIONS: Record<PostStyle, string> = {
+  // 2026-10-03 owner decision: two other types trending in the research pool
+  // (9/16-10/2), one post each per day. "translate" = motomane_beautylab
+  // (likes 7,216) and mochikono_hitorigoto (3,768) both went big with
+  // "I translated confusing beauty names into plain Japanese" + a line of
+  // dialogue per item.
+  translate:
+    "「美容成分の名前、ややこしいから日本語に翻訳してみた」型で書くこと。フックは「〜ややこしいから日本語に翻訳してみた」系の一言(言い回しは毎回変える。「wwww」「🥹」などの軽いノリも可)から入り、成分名を3〜5個、1つずつ「・成分名」の次の行に「」でその成分が話しているような一言(例:「肌のすき間を埋めて、水を逃がしません」)を付けて並べる。セリフは一般に広く言われている働きの範囲だけにし、効能を断定しない。最後はこの商品に入っている成分へつなげ、「で、この中の◯つが入ってるのが、」のような言いかけで終える。この商品に入っていると書いてよい成分は推しポイントにあるものだけ。早見表(悩み→成分)型・言い切り型は混ぜない。",
+  // "surprise" = the "I did a triple take" discovery story: bihada.no.nonochan
+  // (HAKU, likes 5,088, 119 comments), kahonobiyou (3,407), shin_a40beauty
+  // (1,956). Effect claims are the risk here, so the wording rules are strict.
+  surprise:
+    "「ふと気づいて驚いた」体験談型で書くこと。フックは「え、待って。」「朝、鏡見て二度見した。」のような驚きの一言から入り、何気ない日常の場面→ふと肌の変化に気づいた→「新しく変えたのはこれしかない…」と、短い行でテンポよく驚きを重ね、商品名は出さずに「それが、」のような言いかけで終える。身近な人の一言(「肌なんかした?」と聞かれた等)を入れてもよいが、その人の肌の変化は書かない。気づく変化は化粧品の範囲にとどめる(うるおい・ツヤっぽく見える・キメが整って見える・メイクのりがいい気がする等)。「消えた」「消滅」「薄くなった」「治った」など、シミ・シワ・ニキビが変化したと言い切る表現、日数や数字で効果を示す表現は使わない。本文(返信)は「」で商品名→推しポイント→使い方→「あくまで個人の感想です」と添えた一言、で締める。早見表型・言い切り型は混ぜない。",
   // Only used through generateRemixPost below, which builds its own prompt.
   remix: "",
   // 2026-09-28 owner decision, 1週間だけの試し(リスクをほにょから伝えた上で承認): "feed" とは違い、
@@ -293,6 +314,35 @@ export async function generatePostText(
 const REMIX_MAX_OVERLAP = 12;
 const REMIX_MAX_IMAGES_TO_CLAUDE = 4;
 
+// 2026-10-03 owner decision: remix should repeat what made 10/2 20:00 work
+// (2,909 views at ~3h) — an image of skincare products laid out by skin
+// concern — and avoid what didn't (celebrity / person-centered photos: 182 and
+// 254 views, plus portrait-rights risk). Claude looks at the images and says
+// yes/no before a researched post is used as a remix source.
+export async function isConcernProductImage(example: StyleExample): Promise<boolean> {
+  const images = imageBlocks(example);
+  if (images.length === 0) return false;
+  const response = await client.messages.create({
+    model: "claude-opus-5",
+    max_tokens: 16,
+    output_config: { effort: "low" },
+    messages: [
+      {
+        role: "user",
+        content: [
+          ...images,
+          {
+            type: "text",
+            text: "これらの画像について答えてください。画像の主役が「スキンケア・美容の商品(ボトルなど)」か「肌悩み別・成分別の表や比較」で、人物の顔がメインではない場合は YES、それ以外(人物の顔・芸能人・動画の人物の1コマ・食べ物・風景など)は NO。YES か NO の一語だけで答えてください。",
+          },
+        ],
+      },
+    ],
+  } as Anthropic.MessageCreateParamsNonStreaming);
+  const textBlock = response.content.find((block) => block.type === "text");
+  return Boolean(textBlock && textBlock.type === "text" && /YES/i.test(textBlock.text));
+}
+
 function remixInstructions(example: StyleExample): string {
   const comments = (example.topComments ?? []).map((c) => `- ${c.text.replace(/\n+/g, " ")}`).join("\n");
   const authorReplies = (example.authorReplies ?? []).map((r) => `- ${r.replace(/\n+/g, " ")}`).join("\n");
@@ -301,7 +351,7 @@ function remixInstructions(example: StyleExample): string {
 
 手順(考える過程は出力しない):
 1. この投稿がなぜ伸びたかを考える。画像のどこで指が止まるか、書き出しのどこに引きがあるか、コメント欄の読者が何に反応し、何を知りたがっているか。
-2. フックを書く。画像と自然にかみ合い、元の投稿が伸びた理由(感情の動き・引き・テンポ・改行のリズム)を活かす。ただし文言は完全に自分の言葉で書き直すこと。元の投稿と同じ文を使わない。${REMIX_MAX_OVERLAP}文字以上同じ並びを作らない。話の流れを、この商品が応えられる悩みへ自然につなげ、最後は答えが返信にあると分かる引きで終える。
+2. フックを書く。画像と自然にかみ合い、元の投稿が伸びた理由(感情の動き・引き・テンポ・改行のリズム)を活かす。ただし文言は完全に自分の言葉で書き直すこと。元の投稿と同じ文を使わない。${REMIX_MAX_OVERLAP}文字以上同じ並びを作らない。話の流れを、この商品が応えられる悩みへ自然につなげ、最後は答えが返信にあると分かる引きで終える。画像が悩み別・成分別の並びなら、フックも「悩み→成分」を1行ずつ並べる形にして、画像と読み合わせられるようにする。
 3. 本文(返信)を書く。ここが商品を売る本編。コメント欄で読者が知りたがっていたこと・迷っていたことに先回りして答える形で、「商品名」→推しポイント(成分・使い方・使用感)→「☑︎こんな人に」→やわらかい一言、の流れで、読んだ人がリンクを押したくなるように書く。
 
 画像についての決まり:
