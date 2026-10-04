@@ -118,9 +118,16 @@ export type PostStyle =
   | "clone"
   | "remix"
   | "translate"
-  | "surprise";
+  | "surprise"
+  | "combo";
 
 const STYLE_INSTRUCTIONS: Record<PostStyle, string> = {
+  // 2026-10-03 owner decision: our own version of the by-concern combination
+  // chart behind 10/2 20:00's 2,909 views. The hook's chart lines are parsed
+  // into the "悩み別 組み合わせ表" card (cardRenderer.ts parseComboPanels), so
+  // the line format below is strict.
+  combo:
+    "「悩み別の組み合わせ表」型で書くこと。フックは「美容液、組み合わせ多すぎて迷う人これ保存👀」のような共感+保存をうながす一言(言い回しは毎回変える)から入り、続けて悩みごとの組み合わせを4行か6行(画像が2列のため偶数)、必ず「・悩み → 成分A+成分B(夜)」の形で1行ずつ並べる(悩みは8文字以内、成分名は1つ8文字以内、( )の中は「朝」「夜」「朝夜」のどれか)。組み合わせは、原則として次の一般に広く言われているものから選ぶ(この中で、毎回悩みの顔ぶれ・順番を変える): シミ・くすみ→ナイアシンアミド+ビタミンC/くすみ→トラネキサム酸+ビタミンC/透明感→アルブチン+ビタミンC/開き毛穴→ナイアシンアミド+レチノール/たるみ毛穴→レチノール+ヒアルロン酸/乾燥→ヒアルロン酸+セラミド/ゆらぎ・赤み→ドクダミ+セラミド/ゆらぎ→CICA+セラミド/ザラつき→アゼライン酸+ヒアルロン酸/大人ニキビ→ドクダミ+ナイアシンアミド/ハリ不足→レチノール+ナイアシンアミド/ツヤ不足→ビタミンC+ヒアルロン酸。推しポイントにある成分を含む行を少なくとも1〜2行入れる。表のあとに使う順番(化粧水→美容液→クリーム)を一言添え、「この表のうち◯つの成分が1本に入っているのが、」のような言いかけで終える。◯には、表の中で推しポイントに実際にある成分の数以下しか書かない。早見表(悩み→成分1つ)型・言い切り型は混ぜない。",
   // 2026-10-03 owner decision: two other types trending in the research pool
   // (9/16-10/2), one post each per day. "translate" = motomane_beautylab
   // (likes 7,216) and mochikono_hitorigoto (3,768) both went big with

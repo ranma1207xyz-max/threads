@@ -9,7 +9,14 @@ import {
   type StyleExample,
 } from "./contentGenerator.js";
 import { hostCardOnGitHub } from "./cardHosting.js";
-import { hasEnoughRows, parseCheatsheetRows, renderCheatsheetCard } from "./cardRenderer.js";
+import {
+  hasEnoughPanels,
+  hasEnoughRows,
+  parseCheatsheetRows,
+  parseComboPanels,
+  renderCheatsheetCard,
+  renderComboCard,
+} from "./cardRenderer.js";
 import { postToThreads, postCarouselToThreads, postReplyToThreads } from "./threadsClient.js";
 
 const PRODUCTS_PATH = "data/products.json";
@@ -65,7 +72,9 @@ type Slot = PostStyle | "question";
 const SLOT_BY_JST_HOUR: Record<number, Slot> = {
   8: "cheatsheet",
   12: "translate",
-  18: "cheatsheet",
+  // 2026-10-03 owner decision: 18:00 carries our own "悩み別 組み合わせ表"
+  // card (combo); 22:00 keeps the original cheat-sheet card to compare.
+  18: "combo",
   20: "remix",
   21: "surprise",
   22: "cheatsheet",
@@ -87,6 +96,7 @@ const KNOWN_SLOTS = new Set<string>([
   "remix",
   "translate",
   "surprise",
+  "combo",
 ]);
 
 // Which post shape to use, decided by the Japan-time hour the run happens in
@@ -497,21 +507,30 @@ async function main(): Promise<void> {
     !researchSettings.cheatsheetCardHours ||
     researchSettings.cheatsheetCardHours.includes(currentJstHour()) ||
     (dryRun && process.argv.some((arg) => arg.startsWith("--slot=")));
+  // "combo" always gets its own card: the card is the point of that type.
+  const isCardSlot = effectiveSlot === "cheatsheet" || effectiveSlot === "combo";
   if (
-    effectiveSlot === "cheatsheet" &&
+    isCardSlot &&
     !isOneTimeOverrideMoment &&
     researchSettings.attachCheatsheetCard !== false &&
-    isCardHour
+    (isCardHour || effectiveSlot === "combo")
   ) {
     try {
-      const rows = parseCheatsheetRows(hook);
-      if (!hasEnoughRows(rows)) {
-        console.log(`Card skipped: only ${rows.length} table row(s) found in the hook.`);
-      } else if (dryRun) {
-        const previewPath = await renderCheatsheetCard(rows, `cards/preview-${Date.now()}.png`);
-        console.log(`Card preview rendered: ${previewPath}`);
+      let render: ((outPath: string) => Promise<string>) | undefined;
+      if (effectiveSlot === "combo") {
+        const panels = parseComboPanels(hook);
+        if (hasEnoughPanels(panels)) render = (outPath) => renderComboCard(panels, outPath);
+        else console.log(`Card skipped: only ${panels.length} combination row(s) found in the hook.`);
       } else {
-        const cardPath = await renderCheatsheetCard(rows, `cards/card-${Date.now()}.png`);
+        const rows = parseCheatsheetRows(hook);
+        if (hasEnoughRows(rows)) render = (outPath) => renderCheatsheetCard(rows, outPath);
+        else console.log(`Card skipped: only ${rows.length} table row(s) found in the hook.`);
+      }
+      if (render && dryRun) {
+        const previewPath = await render(`cards/preview-${Date.now()}.png`);
+        console.log(`Card preview rendered: ${previewPath}`);
+      } else if (render) {
+        const cardPath = await render(`cards/card-${Date.now()}.png`);
         cardUrl = await hostCardOnGitHub(cardPath);
         console.log(`Card hosted: ${cardUrl}`);
       }
