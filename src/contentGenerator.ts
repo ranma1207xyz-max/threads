@@ -329,10 +329,12 @@ const REMIX_MAX_IMAGES_TO_CLAUDE = 4;
 export async function isConcernProductImage(example: StyleExample): Promise<boolean> {
   const images = imageBlocks(example);
   if (images.length === 0) return false;
+  // A one-word YES/NO judgment, so it runs on Haiku 4.5 (2026-10-05 owner
+  // decision, to stretch API credit) instead of the model that writes posts.
+  // Haiku 4.5 rejects output_config.effort, so none is sent.
   const response = await client.messages.create({
-    model: "claude-opus-5",
+    model: "claude-haiku-4-5",
     max_tokens: 16,
-    output_config: { effort: "low" },
     messages: [
       {
         role: "user",
