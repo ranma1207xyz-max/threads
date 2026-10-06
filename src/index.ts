@@ -73,14 +73,16 @@ type Slot = PostStyle | "question";
 // "surprise" (21:00's remixes of person photos had drawn 182/254 views).
 // 20:00's remix only uses researched posts whose images are skincare products
 // or a by-concern chart (pickRemixExample), else falls back to the card.
+// 2026-10-07 owner decision: only two types stay — "remix" (the one type with
+// repeat hits: 35,625 / 18,588 views) and "cheatsheet". "translate" (12:00),
+// "combo" (18:00) and "surprise" (21:00) had no post above ~650 views and are
+// off the timetable for now; their code is kept so they can come back.
 const SLOT_BY_JST_HOUR: Record<number, Slot> = {
   8: "cheatsheet",
-  12: "translate",
-  // 2026-10-03 owner decision: 18:00 carries our own "悩み別 組み合わせ表"
-  // card (combo); 22:00 keeps the original cheat-sheet card to compare.
-  18: "combo",
+  12: "cheatsheet",
+  18: "cheatsheet",
   20: "remix",
-  21: "surprise",
+  21: "cheatsheet",
   22: "cheatsheet",
 };
 
