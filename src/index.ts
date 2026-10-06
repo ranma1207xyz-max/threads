@@ -3,7 +3,11 @@ import {
   generatePostText,
   generateQuestionPost,
   generateRemixPost,
+  generateTrendPost,
+  identifyFeaturedProducts,
   isConcernProductImage,
+  pickSameRakutenItem,
+  type FeaturedProduct,
   type PostStyle,
   type Product,
   type StyleExample,
@@ -18,6 +22,7 @@ import {
   renderComboCard,
 } from "./cardRenderer.js";
 import { postToThreads, postCarouselToThreads, postReplyToThreads } from "./threadsClient.js";
+import { hasRakutenApiConfig, searchRakutenItems, type RakutenItem } from "./rakutenItems.js";
 
 const PRODUCTS_PATH = "data/products.json";
 const STYLE_EXAMPLES_PATH = "data/style-examples.json";
@@ -45,9 +50,11 @@ interface PostedLogEntry {
   // the same slot can see it is already done (scripts/slot-guard.mjs).
   slotDate?: string;
   slotHour?: number;
+  // "trend" posts: the Rakuten listing that was linked.
+  rakutenItemCode?: string;
 }
 
-type Slot = PostStyle | "question";
+type Slot = PostStyle | "question" | "trend";
 
 // 2026-09-26 owner decision: all 5 daily posts now use the cheat-sheet style.
 // Insight data from 9/21 onward showed it far ahead of every other style
@@ -108,6 +115,7 @@ const KNOWN_SLOTS = new Set<string>([
   "translate",
   "surprise",
   "combo",
+  "trend",
 ]);
 
 // Which post shape to use, decided by the Japan-time hour the run happens in
@@ -324,6 +332,138 @@ async function pickRemixExample(log: PostedLogEntry[]): Promise<StyleExample | u
   return undefined;
 }
 
+// "trend" (2026-10-07 owner decision): a trending post's own images, the very
+// product it introduces (found on Rakuten, our affiliate link), and our own
+// wording following its structure — see contentGenerator.ts. Posts whose
+// images are mainly people (faces etc.) are still skipped, as with remix.
+const TREND_CANDIDATES_TO_CHECK = 6;
+const THREADS_MAX_LENGTH = 500;
+const TREND_MIN_BODY = 150;
+
+interface TrendPick {
+  example: StyleExample;
+  products: { target: FeaturedProduct; item: RakutenItem }[];
+}
+
+async function pickTrendSource(log: PostedLogEntry[]): Promise<TrendPick | undefined> {
+  if (!hasRakutenApiConfig()) {
+    console.log("Trend: Rakuten API keys are not set (RAKUTEN_APP_ID / RAKUTEN_ACCESS_KEY / RAKUTEN_AFFILIATE_ID).");
+    return undefined;
+  }
+  const used = new Set(log.map((entry) => entry.sourcePermalink).filter(Boolean));
+  const candidates = readJson<StyleExample[]>(STYLE_EXAMPLES_PATH)
+    .filter(
+      (example) =>
+        example.source === "threads_browser_research" &&
+        example.genre !== "other" &&
+        example.permalink &&
+        !used.has(example.permalink) &&
+        example.localImages &&
+        example.localImages.length > 0 &&
+        example.localImages.every((path) => existsSync(path))
+    )
+    .sort((a, b) => (b.score ?? b.likes ?? 0) - (a.score ?? a.likes ?? 0))
+    .slice(0, TREND_CANDIDATES_TO_CHECK);
+  for (const candidate of candidates) {
+    if (!(await isConcernProductImage(candidate))) {
+      console.log(`Trend: skipped ${candidate.permalink} (images are not skincare products / a by-concern chart).`);
+      continue;
+    }
+    const targets = await identifyFeaturedProducts(candidate);
+    if (targets.length === 0) {
+      console.log(`Trend: skipped ${candidate.permalink} (no specific product named).`);
+      continue;
+    }
+    const products: TrendPick["products"] = [];
+    for (const target of targets) {
+      const items = await searchRakutenItems(target.keyword);
+      const index = await pickSameRakutenItem(target, items);
+      if (index === undefined) {
+        console.log(`Trend: "${target.brand} ${target.name}" not found on Rakuten as the same product.`);
+        continue;
+      }
+      products.push({ target, item: items[index] });
+    }
+    if (products.length > 0) return { example: candidate, products };
+    console.log(`Trend: skipped ${candidate.permalink} (none of its products are on Rakuten).`);
+  }
+  return undefined;
+}
+
+function trendLinkBlock(products: TrendPick["products"]): string {
+  const lines =
+    products.length === 1
+      ? [products[0].item.affiliateUrl]
+      : products.map(({ target, item }) => `▶︎${target.brand} ${target.name}\n${item.affiliateUrl}`);
+  // Same disclosure as every other post: plain "pr" after the link.
+  return `${lines.join("\n")} pr`;
+}
+
+// Returns false when there is nothing usable today, so the caller can post
+// the cheat-sheet type instead.
+async function runTrendPost(dryRun: boolean, log: PostedLogEntry[]): Promise<boolean> {
+  let pick: TrendPick | undefined;
+  try {
+    pick = await pickTrendSource(log);
+  } catch (error) {
+    console.warn(`Trend: search failed, falling back: ${error instanceof Error ? error.message : error}`);
+    return false;
+  }
+  if (!pick) return false;
+
+  // Affiliate links are long; drop the least central products until the
+  // reply still has room for a real body under Threads' 500-character limit.
+  const products = [...pick.products];
+  while (products.length > 1 && THREADS_MAX_LENGTH - trendLinkBlock(products).length - 2 < TREND_MIN_BODY) products.pop();
+  const linkBlock = trendLinkBlock(products);
+  const bodyMax = Math.min(400, THREADS_MAX_LENGTH - linkBlock.length - 2);
+  console.log(`Trend source: ${pick.example.permalink} (score ${pick.example.score ?? pick.example.likes})`);
+  for (const { target, item } of products) console.log(`Trend product: ${target.brand} ${target.name} -> ${item.name} (${item.shopName})`);
+
+  const generated = await generateTrendPost(pick.example, products, bodyMax);
+  let body = generated.body;
+  if (body.length > bodyMax) {
+    const cut = body.slice(0, bodyMax);
+    body = cut.slice(0, Math.max(cut.lastIndexOf("\n"), Math.floor(bodyMax * 0.6))).trim();
+  }
+  const replyText = `${body}\n\n${linkBlock}`;
+  const localImages = pick.example.localImages!;
+  const imageUrls = localImages.map(repoFileUrl).filter((url): url is string => Boolean(url)).slice(0, 10);
+
+  console.log("=== Generated hook (new post) ===");
+  console.log(generated.hook);
+  console.log("=== Generated reply (body + affiliate link) ===");
+  console.log(replyText);
+  console.log("=================================================");
+  console.log(`Image: ${imageUrls.length > 0 ? imageUrls.join(" | ") : localImages.join(", ") + " (local only)"} (from ${pick.example.permalink})`);
+
+  if (dryRun) {
+    console.log("Dry run: skipping actual post to Threads.");
+    return true;
+  }
+  if (imageUrls.length === 0) throw new Error("Trend: no public URL for the source images (not running on GitHub Actions?).");
+
+  const threadsPostId =
+    imageUrls.length > 1 ? await postCarouselToThreads(generated.hook, imageUrls) : await postToThreads(generated.hook, imageUrls[0]);
+  if (!threadsPostId) throw new Error("Failed to obtain the post ID of the new Threads post. Skipping the reply.");
+  console.log(`STEP 1 done: posted hook to Threads. threadsPostId=${threadsPostId}`);
+  const threadsReplyId = await postReplyToThreads(replyText, threadsPostId);
+  console.log(`STEP 3 done: posted affiliate link as a reply. threadsReplyId=${threadsReplyId}`);
+
+  log.push({
+    productId: `trend:${products[0].item.itemCode}`,
+    postedAt: new Date().toISOString(),
+    threadsPostId,
+    threadsReplyId,
+    sourcePermalink: pick.example.permalink,
+    researchImages: localImages,
+    rakutenItemCode: products.map(({ item }) => item.itemCode).join(","),
+    ...(process.env.SLOT_JST_DATE ? { slotDate: process.env.SLOT_JST_DATE, slotHour: Number(process.env.SLOT_JST_HOUR) } : {}),
+  });
+  writeFileSync(POSTED_LOG_PATH, JSON.stringify(log, null, 2) + "\n");
+  return true;
+}
+
 function repoFileUrl(path: string): string | undefined {
   const repository = process.env.GITHUB_REPOSITORY;
   const branch = process.env.GITHUB_REF_NAME;
@@ -425,6 +565,10 @@ async function main(): Promise<void> {
     await runQuestionPost(dryRun, log);
     return;
   }
+  if (slot === "trend") {
+    if (await runTrendPost(dryRun, log)) return;
+    console.log("Trend: no usable trending post, posting cheatsheet instead.");
+  }
 
   // The recurring A/B story slot (2026-09-27 owner decision) fixes the
   // product for its whole window, overriding the normal rotation for this
@@ -462,7 +606,7 @@ async function main(): Promise<void> {
   const remixExample = slot === "remix" && !oneTimeText && !isStoryMoment ? await pickRemixExample(log) : undefined;
   if (slot === "remix" && !remixExample) console.log("Remix: no unused researched post with saved images, using cheatsheet instead.");
   if (remixExample) console.log(`Remix source: ${remixExample.permalink} (score ${remixExample.score ?? remixExample.likes})`);
-  const effectiveSlot: Slot | undefined = slot === "remix" && !remixExample ? "cheatsheet" : slot;
+  const effectiveSlot: Slot | undefined = (slot === "remix" && !remixExample) || slot === "trend" ? "cheatsheet" : slot;
   const generated =
     oneTimeText ??
     recurringStory ??

@@ -66,6 +66,12 @@ jobs:
           THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
           THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # "trend" posts (2026-10-07): Rakuten item search for the exact product
+          # a trending post introduces. Unset = trend slots post the cheat-sheet.
+          RAKUTEN_APP_ID: ${{ secrets.RAKUTEN_APP_ID }}
+          RAKUTEN_ACCESS_KEY: ${{ secrets.RAKUTEN_ACCESS_KEY }}
+          RAKUTEN_AFFILIATE_ID: ${{ secrets.RAKUTEN_AFFILIATE_ID }}
+          RAKUTEN_REFERER: ${{ vars.RAKUTEN_REFERER }}
         run: |
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             npm run post:dry

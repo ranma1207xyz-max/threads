@@ -431,3 +431,157 @@ ${product.points.map((point) => `- ${point}`).join("\n")}
   }
   return generated!;
 }
+
+// ---------------------------------------------------------------------------
+// "trend" (2026-10-07 owner decision): take a trending post, keep its images
+// as they are, and introduce the very product it introduces — found on
+// Rakuten and linked with our affiliate link — in our own words following its
+// structure. Never a "similar" product: if the exact one can't be found on
+// Rakuten, the post isn't used.
+
+export interface FeaturedProduct {
+  brand: string;
+  name: string;
+  keyword: string; // what to search Rakuten with
+}
+
+async function askHaiku(content: Anthropic.MessageParam["content"], maxTokens: number): Promise<string> {
+  const response = await client.messages.create({
+    model: "claude-haiku-4-5",
+    max_tokens: maxTokens,
+    messages: [{ role: "user", content }],
+  } as Anthropic.MessageCreateParamsNonStreaming);
+  const textBlock = response.content.find((block) => block.type === "text");
+  return textBlock && textBlock.type === "text" ? textBlock.text : "";
+}
+
+function parseJsonLoose<T>(raw: string): T | undefined {
+  const match = raw.match(/[[{][\s\S]*[\]}]/);
+  if (!match) return undefined;
+  try {
+    return JSON.parse(match[0]) as T;
+  } catch {
+    return undefined;
+  }
+}
+
+// The products the post itself is introducing (brand + product name), read
+// from its text, its author's follow-up replies and its images. Most
+// important first, at most 3. Empty when no specific product is named.
+export async function identifyFeaturedProducts(example: StyleExample): Promise<FeaturedProduct[]> {
+  const text = [example.text, ...(example.authorReplies ?? [])].join("\n");
+  const raw = await askHaiku(
+    [
+      ...imageBlocks(example),
+      {
+        type: "text",
+        text: `次のThreadsの投稿(本文・投稿者の返信・画像)が紹介している、具体的なスキンケア・美容の商品を特定してください。
+ブランド名と商品名の両方が本文か画像ではっきり分かるものだけを挙げ、推測で補わないこと。化粧品(スキンケア・メイク・ボディケア・ヘアケア)だけを対象とし、サプリメント・食品・飲み物・医薬品・美容機器は挙げないこと。紹介の中心になっている順に最大3つ。
+JSON配列だけを出力: [{"brand":"ブランド名","name":"商品名","keyword":"楽天市場で検索する語(ブランド名 商品名)"}]
+該当なしなら [] だけを出力。
+
+## 投稿
+${text}`,
+      },
+    ],
+    400
+  );
+  const parsed = parseJsonLoose<FeaturedProduct[]>(raw);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((p) => p && p.brand && p.name && p.keyword).slice(0, 3);
+}
+
+// Which Rakuten listing (if any) is the very same product — same brand and
+// same product line (a different size or a set of it is fine); never a
+// look-alike, a different line of the same brand, an empty container, or a
+// used item. Returns the index into `items`, or undefined.
+export async function pickSameRakutenItem(target: FeaturedProduct, items: RakutenItemSummary[]): Promise<number | undefined> {
+  if (items.length === 0) return undefined;
+  const list = items.map((item, i) => `${i}: ${item.name.slice(0, 120)}(${item.shopName}・${item.price}円・レビュー${item.reviewCount}件)`).join("\n");
+  const raw = await askHaiku(
+    [
+      {
+        type: "text",
+        text: `探している商品: ${target.brand} ${target.name}
+
+楽天市場の検索結果:
+${list}
+
+探している商品と「同じ商品」(同じブランド・同じ商品。容量違いやその商品のセットは可)の番号を1つ選んでください。似た別商品・同じブランドの別シリーズ・空容器・中古・サンプル品は不可。同じ商品が複数あれば、レビュー件数が多く公式・正規店らしいものを優先。
+番号の数字だけを出力。該当なしなら NONE だけを出力。`,
+      },
+    ],
+    16
+  );
+  const index = Number(raw.trim().match(/^\d+/)?.[0]);
+  return Number.isInteger(index) && index >= 0 && index < items.length ? index : undefined;
+}
+
+export interface RakutenItemSummary {
+  name: string;
+  shopName: string;
+  price: number;
+  reviewCount: number;
+  caption: string;
+}
+
+function trendInstructions(example: StyleExample, products: { target: FeaturedProduct; item: RakutenItemSummary }[], bodyMax: number): string {
+  const comments = (example.topComments ?? []).map((c) => `- ${c.text.replace(/\n+/g, " ")}`).join("\n");
+  const authorReplies = (example.authorReplies ?? []).map((r) => `- ${r.replace(/\n+/g, " ")}`).join("\n");
+  const productInfo = products
+    .map(
+      ({ target, item }, i) =>
+        `### 商品${i + 1}: ${target.brand} ${target.name}\n楽天の商品名: ${item.name}\n商品ページの説明(抜粋): ${item.caption.replace(/\s+/g, " ").slice(0, 600)}`
+    )
+    .join("\n\n");
+  return `# 今回の型: 伸びている投稿と同じ商品を、自分の言葉で紹介する(必ずこの型で書き、他の型は混ぜない)
+添付した画像は、下の「伸びている投稿」に実際に付いていた画像です。この画像は、あなたが書くフックと一緒に、そのまま新規投稿として投稿されます。
+紹介する商品は、元の投稿が紹介しているのと同じ商品です(下の「紹介する商品」)。
+
+手順(考える過程は出力しない):
+1. この投稿がなぜ伸びたかを考える。画像のどこで指が止まるか、書き出しのどこに引きがあるか、コメント欄の読者が何に反応し、何を知りたがっているか。
+2. フックを書く。元の投稿の構成(話の順番・改行のリズム・引き・テンポ)はそのまま活かし、画像と自然にかみ合わせる。ただし文言は完全に自分の言葉で書き直すこと。元の投稿と同じ文を使わない。${REMIX_MAX_OVERLAP}文字以上同じ並びを作らない。最後は答えが返信にあると分かる引きで終える。
+3. 本文(返信)を書く。${bodyMax}文字以内。「商品名」→推しポイント→やわらかい一言、の流れ。コメント欄で読者が知りたがっていたことに先回りして答える。
+
+商品についての決まり:
+- 商品の特徴・成分として書いてよいのは、下の「商品ページの説明」に書かれていることだけ。
+- 元の投稿者の体験(「◯日で変わった」など)を、自分の体験として書かない。
+- 画像に写っている人物の名前を書かない。その人物がすすめているとは書かない。
+
+## 伸びている投稿(いいね${example.likes ?? "?"}・返信${example.replies ?? "?"}・リポスト${example.reposts ?? "?"})
+${example.text}
+${authorReplies ? `\n## 投稿者自身の返信(続き)\n${authorReplies}\n` : ""}${comments ? `\n## コメント欄の読者の声\n${comments}\n` : ""}
+## 紹介する商品
+${productInfo}
+
+上記の型で、フックと本文を1組作成してください。`;
+}
+
+export async function generateTrendPost(
+  example: StyleExample,
+  products: { target: FeaturedProduct; item: RakutenItemSummary }[],
+  bodyMax: number
+): Promise<GeneratedPost> {
+  const source = [example.text, ...(example.authorReplies ?? [])].join("\n");
+  const basePrompt = trendInstructions(example, products, bodyMax);
+  let generated: GeneratedPost | undefined;
+  let feedback = "";
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const response = await client.messages.create({
+      model: "claude-opus-5",
+      max_tokens: 1024,
+      system: SYSTEM_PROMPT,
+      output_config: { effort: "low" },
+      messages: [{ role: "user", content: [...imageBlocks(example), { type: "text", text: basePrompt + feedback }] }],
+    } as Anthropic.MessageCreateParamsNonStreaming);
+    const textBlock = response.content.find((block) => block.type === "text");
+    if (!textBlock || textBlock.type !== "text") throw new Error("Claude did not return text content");
+    generated = parseGeneratedPost(textBlock.text.trim());
+
+    const shared = longestSharedRun(`${generated.hook}\n${generated.body}`, source);
+    if (shared.length < REMIX_MAX_OVERLAP) return generated;
+    console.warn(`Trend attempt ${attempt}: ${shared.length} chars copied from the source ("${shared}").`);
+    feedback = `\n\n注意: 前回の案は元の投稿と「${shared}」が同じ並びでした。この部分を含め、元の投稿の言い回しを使わず自分の言葉で書き直してください。`;
+  }
+  return generated!;
+}
