@@ -41,6 +41,10 @@ interface PostedLogEntry {
   // The self-made cheat-sheet card's public URL, when one was attached — so
   // card posts can be told apart from image-free ones when comparing views.
   cardImage?: string;
+  // The scheduled slot (JST date + hour) this post filled, so a backup run of
+  // the same slot can see it is already done (scripts/slot-guard.mjs).
+  slotDate?: string;
+  slotHour?: number;
 }
 
 type Slot = PostStyle | "question";
@@ -80,7 +84,12 @@ const SLOT_BY_JST_HOUR: Record<number, Slot> = {
   22: "cheatsheet",
 };
 
+// The JST hour of the slot this run belongs to. Scheduled runs get it from
+// scripts/slot-guard.mjs (SLOT_JST_HOUR, taken from the cron line that fired
+// the run), so a run GitHub delayed past the hour still posts its own slot's
+// type (2026-10-07). Manual runs fall back to the clock.
 function currentJstHour(): number {
+  if (process.env.SLOT_JST_HOUR) return Number(process.env.SLOT_JST_HOUR);
   return Number(
     new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", hour: "numeric", hourCycle: "h23" }).format(new Date())
   );
@@ -101,19 +110,17 @@ const KNOWN_SLOTS = new Set<string>([
 
 // Which post shape to use, decided by the Japan-time hour the run happens in
 // (2026-09-19 owner decision: split the evening posts by type so they don't
-// all read alike). Runs are often delayed 10-15 minutes by GitHub Actions,
-// so the hour is a reliable key. `--slot=<name>` overrides it for dry runs;
-// any other hour (e.g. a manual run) gets no forced type.
+// all read alike). GitHub Actions can delay runs by hours, so the hour comes
+// from the schedule that fired the run (see currentJstHour). `--slot=<name>`
+// overrides it for dry runs; any other hour (e.g. a manual run) gets no
+// forced type.
 function pickSlot(): Slot | undefined {
   const override = process.argv.find((arg) => arg.startsWith("--slot="))?.slice("--slot=".length);
   if (override) {
     if (!KNOWN_SLOTS.has(override)) throw new Error(`Unknown --slot value: ${override}`);
     return override as Slot;
   }
-  const hour = Number(
-    new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", hour: "numeric", hourCycle: "h23" }).format(new Date())
-  );
-  return SLOT_BY_JST_HOUR[hour];
+  return SLOT_BY_JST_HOUR[currentJstHour()];
 }
 
 function readJson<T>(path: string): T {
@@ -666,6 +673,9 @@ async function main(): Promise<void> {
     ...(remixExample ? { sourcePermalink: remixExample.permalink } : {}),
     ...(remixUrls && !usedFallbackImage ? { researchImages: remixExample!.localImages } : {}),
     ...(cardUrl && !usedFallbackImage ? { cardImage: cardUrl } : {}),
+    ...(process.env.SLOT_JST_DATE
+      ? { slotDate: process.env.SLOT_JST_DATE, slotHour: Number(process.env.SLOT_JST_HOUR) }
+      : {}),
   });
   writeFileSync(POSTED_LOG_PATH, JSON.stringify(log, null, 2) + "\n");
 }

@@ -5,7 +5,15 @@ on:
     # 08:00 / 12:00 / 18:00 / 20:00 / 21:00 / 22:00 JST (UTC+9) -> 23:00(前日) / 03:00 / 09:00 / 11:00 / 12:00 / 13:00 UTC
     # (2026-10-01: 19時は閲覧が他の時間の約4分の1だったため22時に移動)
     # (2026-10-03: 12時を追加して1日6回に。12時=翻訳型・21時=驚き体験談型)
-    - cron: "0 23,3,9,11,12,13 * * *"
+    # (2026-10-07: 10/3〜10/6にGitHubが23回中9回の起動を飛ばし、ほかも数時間遅れたため、
+    #  混みやすい0分を避けて各枠を7・27・47分の3回起動に。どの枠かを見分けられるよう1枠1行。
+    #  2回目以降は、その枠がもう投稿済みなら何もせず終わる: scripts/slot-guard.mjs)
+    - cron: "7,27,47 23 * * *"
+    - cron: "7,27,47 3 * * *"
+    - cron: "7,27,47 9 * * *"
+    - cron: "7,27,47 11 * * *"
+    - cron: "7,27,47 12 * * *"
+    - cron: "7,27,47 13 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -15,6 +23,12 @@ on:
 
 permissions:
   contents: write
+
+# One post run at a time, so a backup try always sees the previous try's
+# posted-log.json before deciding whether to post.
+concurrency:
+  group: threads-post
+  cancel-in-progress: false
 
 jobs:
   post:
@@ -26,19 +40,28 @@ jobs:
         with:
           node-version: "20"
 
-      - run: npm install
+      - name: Check whether this slot is already posted
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+        run: node scripts/slot-guard.mjs
+
+      - if: env.SLOT_SKIP != 'true'
+        run: npm install
 
       # The cheat-sheet card image is rendered with Chromium and pushed to the repo
       # (so Threads can fetch it from a public URL) before the post is published.
       - name: Install Playwright Chromium
+        if: env.SLOT_SKIP != 'true'
         run: npx playwright install --with-deps chromium
 
       - name: Configure git identity
+        if: env.SLOT_SKIP != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Generate and post
+        if: env.SLOT_SKIP != 'true'
         env:
           THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
           THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
@@ -51,9 +74,11 @@ jobs:
           fi
 
       - name: Commit updated posted-log.json
+        if: env.SLOT_SKIP != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/posted-log.json
           git diff --cached --quiet || git commit -m "chore: update posted-log.json [skip ci]"
+          git pull --rebase
           git push
