@@ -1,3 +1,4 @@
+import Anthropic from "@anthropic-ai/sdk";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { type StyleExample } from "./contentGenerator.js";
 import {
@@ -93,6 +94,42 @@ function pruneOldImages(): void {
     }
   }
 }
+// 2026-10-07 owner decision: a feed post no longer needs beauty words in its
+// text — many product posts say only things like "Threads買いしたやつ!".
+// Such posts are kept when their first image shows cosmetics/skincare
+// (a one-word Haiku check), so unrelated viral posts still stay out.
+const MAX_IMAGE_CHECKS = 30;
+
+async function isBeautyImage(client: Anthropic, url: string): Promise<boolean> {
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    const type = response.headers.get("content-type") ?? "";
+    if (!response.ok || !/image\/(jpeg|png)/.test(type)) return false;
+    const data = Buffer.from(await response.arrayBuffer()).toString("base64");
+    const result = await client.messages.create({
+      model: "claude-haiku-4-5",
+      max_tokens: 8,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: type.includes("png") ? "image/png" : "image/jpeg", data } },
+            {
+              type: "text",
+              text: "この画像の主役は、化粧品(スキンケア・メイク・ボディケア・ヘアケアの商品)や、肌悩み・成分の表ですか? YES か NO の一語だけで答えてください。",
+            },
+          ],
+        },
+      ],
+    });
+    const block = result.content.find((b) => b.type === "text");
+    return Boolean(block && block.type === "text" && /YES/i.test(block.text));
+  } catch (error) {
+    console.warn(`  image check failed: ${error instanceof Error ? error.message : error}`);
+    return false;
+  }
+}
+
 // Our own posting account; its posts appear in its own feed but are not research material.
 const OWN_USERNAME = "bihada_biyoshitsu";
 
@@ -131,10 +168,27 @@ async function main(): Promise<void> {
   try {
     console.log("Reading the recommended (おすすめ) feed...");
     const allFeedCandidates = await searchFeedCandidates(page, FEED_SCROLLS);
-    const feedCandidates = allFeedCandidates.filter((c) => isBeautyRelated(c.text));
+    const textMatched = allFeedCandidates.filter((c) => isBeautyRelated(c.text));
+    const imageMatched: CandidatePost[] = [];
+    if (process.env.ANTHROPIC_API_KEY) {
+      const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      const toCheck = allFeedCandidates
+        .filter((c) => !isBeautyRelated(c.text) && c.imageUrls.length > 0 && c.username !== OWN_USERNAME)
+        .sort((a, b) => engagementScore(b) - engagementScore(a))
+        .slice(0, MAX_IMAGE_CHECKS);
+      for (const candidate of toCheck) if (await isBeautyImage(client, candidate.imageUrls[0])) imageMatched.push(candidate);
+      console.log(`  -> ${imageMatched.length} of ${toCheck.length} feed post(s) without beauty words kept for their cosmetics image.`);
+    }
+    const feedCandidates = [...textMatched, ...imageMatched];
     if (settings.includeOtherGenreStyles) {
       const others = allFeedCandidates
-        .filter((c) => !isBeautyRelated(c.text) && c.username !== OWN_USERNAME && isUsableOtherGenrePost(c.text))
+        .filter(
+          (c) =>
+            !isBeautyRelated(c.text) &&
+            !imageMatched.includes(c) &&
+            c.username !== OWN_USERNAME &&
+            isUsableOtherGenrePost(c.text)
+        )
         .sort((a, b) => b.likes - a.likes)
         .slice(0, settings.maxOtherGenreExamples);
       // Structure-only references: no reply inspection, and the photo is dropped
