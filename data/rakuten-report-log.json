@@ -320,5 +320,12 @@
     "clicks": 4,
     "salesCount": 0,
     "capturedAt": "2026-11-12T21:37:08.688Z"
+  },
+  {
+    "salesAmountYen": 0,
+    "rewardYen": 0,
+    "clicks": 4,
+    "salesCount": 0,
+    "capturedAt": "2026-11-13T21:01:00.251Z"
   }
 ]
